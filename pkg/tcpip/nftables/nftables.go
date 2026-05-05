@@ -417,14 +417,14 @@ func (r *Rule) evaluate(regs *registerSet, evalCtx opEvalCtx) *syserr.AnnotatedE
 // NewNFTables creates a new NFTables state object using the given clock for
 // timing operations.
 // Note: Expects random number generator to be initialized with a seed.
-func NewNFTables(clock tcpip.Clock, rng rand.RNG) *NFTables {
+func NewNFTables(stack *stack.Stack, clock tcpip.Clock, rng rand.RNG) *NFTables {
 	if clock == nil {
 		panic("nftables state must be initialized with a non-nil clock")
 	}
 	if rng.Reader == nil {
 		panic("nftables state must be initialized with a non-nil random number generator")
 	}
-	return &NFTables{clock: clock, startTime: clock.Now(), rng: rng, tableHandleCounter: atomicbitops.Uint64{}, genid: 1}
+	return &NFTables{stack: stack, clock: clock, startTime: clock.Now(), rng: rng, tableHandleCounter: atomicbitops.Uint64{}, genid: 1}
 }
 
 // GetGenID returns the generation ID for the NFTables object.
@@ -1381,6 +1381,10 @@ func (r *Rule) AddOpFromExprInfo(tab *Table, exprInfo ExprInfo) *syserr.Annotate
 		if op, err = initPayload(tab, exprInfo); err != nil {
 			return err
 		}
+	case OpTypeBitwise:
+		if op, err = initBitwise(tab, exprInfo); err != nil {
+			return err
+		}
 	case OpTypeMeta:
 		if op, err = initMeta(tab, exprInfo); err != nil {
 			return err
@@ -1399,6 +1403,10 @@ func (r *Rule) AddOpFromExprInfo(tab *Table, exprInfo ExprInfo) *syserr.Annotate
 		}
 	case OpTypeLookup:
 		if op, err = initLookup(tab, exprInfo); err != nil {
+			return err
+		}
+	case OpTypeFIB:
+		if op, err = initFIB(tab, exprInfo); err != nil {
 			return err
 		}
 
