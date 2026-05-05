@@ -1746,7 +1746,7 @@ func (c *sandboxNetstackCreator) newEmptySandboxNetworkStack() (*netstack.Stack,
 	}), c.uid.UniqueID())
 
 	if nftables.IsNFTablesEnabled() {
-		s.Stack.SetNFTables(nftables.NewNFTables(c.clock, s.Stack.SecureRNG()))
+		s.Stack.SetNFTables(nftables.NewNFTables(s.Stack, c.clock, s.Stack.SecureRNG()))
 	}
 
 	// Enable SACK Recovery.
