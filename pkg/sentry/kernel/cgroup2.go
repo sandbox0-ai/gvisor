@@ -45,6 +45,12 @@ type Cgroup2 interface {
 	// Used by procfs.
 	Path() string
 
+	// ReadControl implements background accessible reading for cgroup v2 control files.
+	ReadControl(ctx context.Context, name string) (string, error)
+
+	// WriteControl implements background accessible writing for cgroup v2 control files.
+	WriteControl(ctx context.Context, name string, val string) error
+
 	// The following are used by clone() and CreateProcess().
 	// CanEnter checks if a task can enter the cgroup.
 	CanEnter(ctx context.Context, t *Task) (func(), func(), error)
@@ -68,6 +74,9 @@ type Cgroup2FS interface {
 
 	// RootCgroup returns the root cgroup v2 node.
 	RootCgroup() Cgroup2
+
+	// FindCgroup returns the cgroup v2 node at the specified root-relative path.
+	FindCgroup(ctx context.Context, path string) (Cgroup2, error)
 
 	// LockTree locks the cgroup2fs tree for writing.
 	LockTree()
