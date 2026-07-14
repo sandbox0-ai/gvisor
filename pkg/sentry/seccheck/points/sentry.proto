@@ -66,6 +66,11 @@ message ExecveInfo {
 
   // BinaryIno is the virtualized inode number of the executable binary file.
   uint64 binary_ino = 10;
+
+  // Standard input, output, and error file descriptor info.
+  gvisor.common.FdInfo stdin = 11;
+  gvisor.common.FdInfo stdout = 12;
+  gvisor.common.FdInfo stderr = 13;
 }
 
 message ExitNotifyParentInfo {

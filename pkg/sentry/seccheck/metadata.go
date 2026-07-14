@@ -66,6 +66,10 @@ const (
 	// FieldSentryExecveBinarySha256 is an optional field to collect the SHA-256
 	// hash of the binary being executed.
 	FieldSentryExecveBinarySha256
+
+	// FieldSentryExecveFdInfo is an optional field to collect information
+	// about standard file descriptors (stdin, stdout, stderr).
+	FieldSentryExecveFdInfo
 )
 
 // Points is a map with all the trace points registered in the system.
@@ -128,7 +132,7 @@ type SinkDesc struct {
 	// is called. config is an opaque json object passed to the sink.
 	Setup func(config map[string]any) (*os.File, error)
 	// New creates a new sink. config is an opaque json object passed to the sink.
-	// endpoing is a file descriptor to the file returned in Setup. It's set to -1
+	// endpoint is a file descriptor to the file returned in Setup. It's set to -1
 	// if Setup returned nil.
 	New func(config map[string]any, endpoint *fd.FD) (Sink, error)
 }
@@ -253,6 +257,10 @@ func genericInit() {
 			{
 				ID:   FieldSentryExecveBinarySha256,
 				Name: "binary_sha256",
+			},
+			{
+				ID:   FieldSentryExecveFdInfo,
+				Name: "fd_info",
 			},
 		},
 		ContextFields: defaultContextFields,
