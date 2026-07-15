@@ -7,7 +7,8 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
+  issues: write
+  pull-requests: read
 
 concurrency:
   group: sync-upstream-master
@@ -29,6 +30,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          issue_marker='<!-- sandbox0-upstream-sync -->'
+          existing_issue="$({
+            gh issue list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --state open \
+              --limit 100 \
+              --json number,body \
+              --jq ".[] | select(.body | contains(\"${issue_marker}\")) | .number"
+          } | head -n1)"
+
           git config user.name "sandbox0-upstream-sync[bot]"
           git config user.email "sandbox0-upstream-sync[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/google/gvisor.git
@@ -38,6 +49,11 @@ jobs:
 
           if git merge-base --is-ancestor upstream/master HEAD; then
             echo "Fork master already contains upstream master."
+            if [[ -n "${existing_issue}" ]]; then
+              gh issue close "${existing_issue}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --comment "Fork master now contains the latest upstream master."
+            fi
             exit 0
           fi
 
@@ -55,12 +71,38 @@ jobs:
           )"
           if [[ -n "${existing_pr}" ]]; then
             echo "Updated upstream sync PR #${existing_pr}."
+            if [[ -n "${existing_issue}" ]]; then
+              gh issue close "${existing_issue}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --comment "Tracking continues in PR #${existing_pr}."
+            fi
             exit 0
           fi
 
-          gh pr create \
+          upstream_commit="$(git rev-parse upstream/master)"
+          sync_commit="$(git rev-parse HEAD)"
+          compare_url="https://github.com/${GITHUB_REPOSITORY}/compare/master...sync/upstream-master?expand=1"
+          issue_body="$(cat <<EOF
+          ${issue_marker}
+          The scheduled workflow updated \`sync/upstream-master\` with the latest \`google/gvisor:master\`.
+
+          - Upstream commit: \`${upstream_commit}\`
+          - Sync commit: \`${sync_commit}\`
+          - Review and open the sync PR: ${compare_url}
+
+          GitHub organization policy does not allow \`GITHUB_TOKEN\` to create pull requests, so a maintainer must open the PR from the prepared branch.
+          EOF
+          )"
+
+          if [[ -n "${existing_issue}" ]]; then
+            gh issue edit "${existing_issue}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "${issue_body}"
+            echo "Updated upstream sync issue #${existing_issue}."
+            exit 0
+          fi
+
+          gh issue create \
             --repo "${GITHUB_REPOSITORY}" \
-            --base master \
-            --head sync/upstream-master \
-            --title "chore: sync google/gvisor master" \
-            --body $'Merge the latest `google/gvisor:master` into the Sandbox0 fork for review and CI.\n\nThis PR is created by the scheduled upstream sync workflow.'
+            --title "chore: review pending google/gvisor sync" \
+            --body "${issue_body}"
