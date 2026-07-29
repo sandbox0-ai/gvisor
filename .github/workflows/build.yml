@@ -41,8 +41,11 @@ jobs:
             gvisor-bin \
             SHA256SUMS
         )
-        sha256sum dist/gvisor-release-linux-x86_64.tar.gz \
-          > dist/gvisor-release-linux-x86_64.tar.gz.sha256
+        (
+          cd dist
+          sha256sum gvisor-release-linux-x86_64.tar.gz \
+            > gvisor-release-linux-x86_64.tar.gz.sha256
+        )
 
     - name: Upload release candidate
       uses: actions/upload-artifact@v4
