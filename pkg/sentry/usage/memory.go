@@ -416,29 +416,41 @@ func (m *MemoryLocked) CopyPerCg(memCgID uint32) (MemoryStats, uint64) {
 	return ms.copyLocked(), ms.totalLocked()
 }
 
-// These options control how much total memory the is reported to the
-// application. They may only be set before the application starts executing,
-// and must not be modified.
-var (
-	// MinimumTotalMemoryBytes is the minimum reported total system memory.
-	MinimumTotalMemoryBytes uint64 = 2 << 30 // 2 GB
+const defaultMinimumTotalMemoryBytes = 2 << 30 // 2 GB
 
-	// MaximumTotalMemoryBytes is the maximum reported total system memory.
-	// The 0 value indicates no maximum.
-	MaximumTotalMemoryBytes uint64
-)
+// totalMemoryLimit controls how much total memory is reported to the
+// application. It is updated atomically because OCI resource updates may
+// change the sandbox memory limit while applications are running. A value of 0
+// means that no maximum is configured.
+var totalMemoryLimit atomicbitops.Uint64
+
+// SetTotalMemoryLimit changes the amount of total memory reported to the
+// application. A limit of 0 restores the default unbounded behavior.
+func SetTotalMemoryLimit(limit uint64) {
+	totalMemoryLimit.Store(limit)
+}
+
+// TotalMemoryLimit returns the maximum amount of total memory reported to the
+// application. A return value of 0 means that no maximum is configured.
+func TotalMemoryLimit() uint64 {
+	return totalMemoryLimit.Load()
+}
 
 // TotalMemory returns the "total usable memory" available.
 //
-// This number doesn't really have a true value so it's based on the following
-// inputs and further bounded to be above the MinumumTotalMemoryBytes and below
-// MaximumTotalMemoryBytes.
+// This number doesn't really have a true value, so it's based on the following
+// inputs and bounded by the configured total memory limit.
 //
 // memSize should be the platform.Memory size reported by platform.Memory.TotalSize()
 // used is the total memory reported by MemoryLocked.Total()
 func TotalMemory(memSize, used uint64) uint64 {
-	if memSize < MinimumTotalMemoryBytes {
-		memSize = MinimumTotalMemoryBytes
+	limit := totalMemoryLimit.Load()
+	minimum := uint64(defaultMinimumTotalMemoryBytes)
+	if limit > 0 {
+		minimum = limit
+	}
+	if memSize < minimum {
+		memSize = minimum
 	}
 	if memSize < used {
 		memSize = used
@@ -448,8 +460,8 @@ func TotalMemory(memSize, used uint64) uint64 {
 			memSize = uint64(1) << (uint(msb) + 1)
 		}
 	}
-	if MaximumTotalMemoryBytes > 0 && memSize > MaximumTotalMemoryBytes {
-		memSize = MaximumTotalMemoryBytes
+	if limit > 0 && memSize > limit {
+		memSize = limit
 	}
 	return memSize
 }

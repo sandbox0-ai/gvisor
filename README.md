@@ -1,185 +1,200 @@
+# Sandbox0 gVisor Fork
+
 ![gVisor](g3doc/logo.png)
 
-[![Build status](https://badge.buildkite.com/3b159f20b9830461a71112566c4171c0bdfd2f980a8e4c0ae6.svg?branch=master)](https://buildkite.com/gvisor/pipeline)
-[![Issue reviver](https://github.com/google/gvisor/actions/workflows/issue_reviver.yml/badge.svg)](https://github.com/google/gvisor/actions/workflows/issue_reviver.yml)
-[![CodeQL](https://github.com/google/gvisor/actions/workflows/codeql.yml/badge.svg)](https://github.com/google/gvisor/actions/workflows/codeql.yml)
-[![gVisor chat](https://badges.gitter.im/gvisor/community.png)](https://gitter.im/gvisor/community)
-[![code search](https://img.shields.io/badge/code-search-blue)](https://cs.opensource.google/gvisor/gvisor)
+This repository is the production gVisor fork used by
+[Sandbox0](https://github.com/sandbox0-ai/sandbox0). It tracks
+[google/gvisor](https://github.com/google/gvisor) and carries a small set of
+runtime changes that Sandbox0 cannot yet obtain from an upstream release.
 
-## What is gVisor?
+This README is the inventory of those changes. Before replacing a Sandbox0
+runtime with an official gVisor build, review the fork delta and complete the
+replacement checks below.
 
-**gVisor** provides a strong layer of isolation between running applications and
-the host operating system. It is an application kernel that implements a
-[Linux-like interface][linux]. Unlike Linux, it is written in a memory-safe
-language (Go) and runs in userspace.
+The fork was last compared with upstream `master` at
+[`43396a1925`](https://github.com/google/gvisor/commit/43396a19255cdbaa230c4cfbffc2f8e2aff5f6b1)
+on July 29, 2026. Neither runtime change listed below had an equivalent
+implementation at that revision.
 
-gVisor includes an [Open Container Initiative (OCI)][oci] runtime called `runsc`
-that makes it easy to work with existing container tooling. The `runsc` runtime
-integrates with Docker and Kubernetes, making it simple to run sandboxed
-containers.
+## Runtime Delta
 
-## What **isn't** gVisor?
+| Change | Sandbox0 change | Why it is retained | Replacement impact |
+| --- | --- | --- | --- |
+| Direct containerd shim stats | [PR #1](https://github.com/sandbox0-ai/gvisor/pull/1), [`acdf789b6a`](https://github.com/sandbox0-ai/gvisor/commit/acdf789b6a1939040033933f2ec048237a54abd6) | Avoids starting one `runsc events --stats` process for every CRI stats request and sandbox container. | Upstream remains functionally usable, but replacing the fork reintroduces substantial CPU and fork/exec overhead on dense nodes. |
+| Live resource-view updates | [PR #8](https://github.com/sandbox0-ai/gvisor/pull/8), [`43a3d25c8a`](https://github.com/sandbox0-ai/gvisor/commit/43a3d25c8ad3ac201b1cc0ef61f2d13e9ce8509d) | Makes CPU and memory changes from `runsc update` visible inside an already running sandbox. | Required for Sandbox0's idle-to-active in-place resize path. Without it, Kubernetes and the host cgroup resize while the guest continues to report its startup resources. |
 
-*   gVisor is **not a syscall filter** (e.g. `seccomp-bpf`), nor a wrapper over
-    Linux isolation primitives (e.g. `firejail`, AppArmor, etc.).
-*   gVisor is also **not a VM** in the everyday sense of the term (e.g.
-    VirtualBox, QEMU).
+Changes under `.github/` only support fork maintenance. They do not alter the
+runtime binaries and do not block replacing this fork with upstream.
 
-**gVisor takes a distinct third approach**, providing many security benefits of
-VMs while maintaining the lower resource footprint, fast startup, and
-flexibility of regular userspace applications.
+### Direct Containerd Shim Stats
 
-## Why does gVisor exist?
+Upstream `Runsc.Stats` starts a `runsc events --stats` subprocess on every call.
+Kubelet CRI stats collection invokes this path for every sandbox container, so
+the process cost becomes material on nodes with hundreds of sandboxes.
 
-Containers are not a [**sandbox**][sandbox]. While containers have
-revolutionized how we develop, package, and deploy applications, using them to
-run untrusted or potentially malicious code without additional isolation is not
-a good idea. While using a single, shared kernel allows for efficiency and
-performance gains, it also means that container escape is possible with a single
-vulnerability.
+The fork:
 
-gVisor is an application kernel for containers. It limits the host kernel
-surface accessible to the application while still giving the application access
-to all the features it expects. Unlike most kernels, gVisor does not assume or
-require a fixed set of physical resources; instead, it leverages existing host
-kernel functionality and runs as a normal process. In other words, gVisor
-implements Linux by way of Linux.
+- reads the existing runsc state while holding its advisory lock;
+- caches sandbox-lifetime metadata, including the control socket and host
+  cgroup;
+- calls the existing `containerManager.Event` control RPC directly;
+- applies the same host-cgroup CPU correction as the CLI path;
+- invalidates the cache after a direct-path failure; and
+- falls back to the upstream CLI implementation when the direct path is
+  unavailable.
 
-gVisor should not be confused with technologies and tools to harden containers
-against external threats, provide additional integrity checks, or limit the
-scope of access for a service. One should always be careful about what data is
-made available to a container.
+In the production comparison recorded in PR #1, the direct path reduced average
+host CPU from 60.68% to 16.70%, CPU p95 from 100% to 36.70%, and forks from
+271.30/s to 17.18/s. The baseline executed `runsc events --stats` 11,254 times
+during the observation window; the direct path executed it zero times.
 
-## Documentation
+This is primarily a performance requirement. An upstream build can be considered
+equivalent when its shim obtains the same stats without one subprocess per
+container and preserves the existing CRI stats fields and CPU accounting.
 
-User documentation and technical architecture, including quick start guides, can
-be found at [gvisor.dev][gvisor-dev].
+### Live Resource-View Updates
 
-## Installing from source
+Upstream `runsc update` updates the host cgroup and saved OCI spec. The Sentry's
+application CPU count and reported total memory are initialized only when the
+sandbox starts, so the values observed by applications do not follow a later
+Kubernetes in-place resize.
 
-gVisor builds on x86_64 and ARM64. Other architectures may become available in
-the future.
+The fork adds a Sentry resource-update RPC and refreshes:
 
-For the purposes of these instructions, [bazel][bazel] and other build
-dependencies are wrapped in a build container. It is possible to use
-[bazel][bazel] directly, or type `make help` for standard targets.
+- the application CPU count and CPU clock storage;
+- existing task CPU affinity masks and assigned virtual CPUs;
+- total memory reported through `/proc/meminfo` and `sysinfo(2)`;
+- `/proc/cpuinfo`;
+- `/sys/devices/system/cpu/{online,possible,present}`; and
+- the sandbox-visible cgroup v1 CPU quota, CPU period, and memory limit at both
+  the hierarchy root and the per-container child.
 
-### Requirements
+Explicit OCI update values take precedence over the parent cgroup snapshot.
+This matters because kubelet may apply the pod parent cgroup before or after the
+runtime call depending on resize direction. A new runsc binary also tolerates a
+sandbox started by an older Sentry binary: if the new RPC is unavailable, it
+logs a warning and preserves the original host-cgroup update behavior.
 
-Make sure the following dependencies are installed:
+Current boundaries:
 
-*   Linux 4.14.77+ ([older linux][old-linux])
-*   [Docker version 17.09.0 or greater][docker]
+- CPU reporting retains gVisor's two-CPU minimum and never exceeds CPUs
+  available on the host.
+- Sandbox0 currently relies on the cgroup v1 guest view. This patch is not
+  evidence that equivalent cgroup v2 views update correctly.
+- CPU directory entries under `/sys/devices/system/cpu/cpuN` are created at
+  boot. The online, possible, and present sets are dynamic.
 
-### Building
+This is a correctness requirement for Sandbox0. An upstream build is equivalent
+only when a running sandbox observes both CPU and memory changes without being
+restarted.
 
-Build and install the `runsc` binary:
+## Can Sandbox0 Replace This Fork?
+
+Not yet without either losing the direct-stats optimization or breaking
+guest-visible in-place resize. Do not decide from commit ancestry alone: an
+upstream implementation may be equivalent without using the same code.
+
+Before switching to an official gVisor release:
+
+1. Compare the intended upstream release with the deployed Sandbox0 tag and
+   review every runtime entry in the table above.
+2. Confirm that repeated containerd CRI stats collection does not execute one
+   `runsc events --stats` subprocess per sandbox container, or explicitly accept
+   the measured performance regression.
+3. Confirm that `runsc update` propagates CPU and memory changes into the
+   running Sentry and all application-visible interfaces listed above.
+4. Build `runsc` and `containerd-shim-runsc-v1` from the same upstream commit.
+5. Run the focused tests and the remote Kubernetes smoke test below.
+6. Update this README with the upstream commit or release that supersedes each
+   fork change before removing it.
+
+If both runtime rows are superseded and the smoke test passes, the `.github/`
+fork-maintenance differences can be ignored and Sandbox0 can use the official
+gVisor binaries directly.
+
+## Replacement Smoke Test
+
+Run this test on the same Kubernetes runtime class and node shape used by
+Sandbox0 production:
+
+1. Start a sandbox at `150m` CPU and `128Mi` memory.
+2. Resize it in place to `900m` CPU and `2Gi` memory.
+3. Resize it back to `300m` CPU and `256Mi` memory.
+4. Verify after each transition:
+   - Kubernetes spec and status contain the requested resources;
+   - `restartCount` remains zero and resize conditions clear;
+   - `getconf _NPROCESSORS_ONLN` reflects the effective CPU quota, subject to
+     the two-CPU minimum and host CPU count;
+   - `MemTotal` in `/proc/meminfo` reflects the requested memory;
+   - `/proc/cpuinfo` and sysfs CPU sets agree with the effective CPU count; and
+   - guest cgroup CPU quota/period and memory limit reflect the new values.
+5. Exercise CRI sandbox stats at production-like sandbox density and verify
+   both metric correctness and the absence of recurring stats subprocesses.
+
+PR #8 was remotely validated with
+`150m/128Mi -> 900m/2Gi -> 300m/256Mi` and `restartCount=0`. Memory and guest
+cgroup values followed both resize directions. The validation node had two
+physical CPUs, so dynamic growth beyond two CPUs is covered by unit tests and
+must still be checked on production-sized nodes before an upstream replacement.
+
+## Comparing with Upstream
+
+For a clone whose `origin` points to this fork:
+
+```sh
+git remote add upstream https://github.com/google/gvisor.git
+git fetch upstream master
+git log --left-right --cherry-pick --oneline upstream/master...master
+git diff --stat upstream/master...master
+```
+
+Compare against the exact upstream release intended for deployment as well as
+upstream `master`. A fix on `master` is not available to Sandbox0 until it is
+included in the pinned release or deliberately backported.
+
+## Build and Test
+
+gVisor uses Bazel, with `make` wrappers that run the canonical build container.
+Build matched runtime binaries from the same commit:
 
 ```sh
 mkdir -p bin
-make copy TARGETS=runsc DESTINATION=bin/
-sudo cp ./bin/runsc /usr/local/bin
+make copy TARGETS="//runsc:runsc" DESTINATION=bin/
+make copy TARGETS="//shim:containerd-shim-runsc-v1" DESTINATION=bin/
 ```
 
-To build specific libraries or binaries, you can specify the target:
+Relevant focused tests for the fork delta include:
 
 ```sh
-make build TARGETS="//pkg/tcpip:tcpip"
+make test TARGETS="//pkg/shim/v1/runsccmd:runsccmd_test"
+make test TARGETS="//pkg/sentry/usage:usage_test"
+make test TARGETS="//pkg/sentry/kernel:kernel_test"
+make test TARGETS="//pkg/sentry/fsimpl/sys:sys_integration_test"
+make test TARGETS="//pkg/sentry/fsimpl/proc:proc_test" \
+  OPTIONS="--test_filter=TestCPUInfoReflectsApplicationCores"
+make test TARGETS="//pkg/sentry/control:control_test" \
+  OPTIONS="--test_filter=TestResource.*"
+make test TARGETS="//runsc/sandbox:sandbox_test" \
+  OPTIONS="--test_filter=TestResource.*"
 ```
 
-### Building directly with Bazel (without Docker)
+See the upstream
+[build documentation](https://gvisor.dev/docs/user_guide/install/) and
+[contribution guide](CONTRIBUTING.md) for the full build and test suites.
 
-Using Bazel directly isn't recommended due to the extra overhead, but in order
-to get started:
+## About Upstream gVisor
 
--   Look at the [build dockerfile](images/default/Dockerfile) for the canonical
-    list of needed dependencies.
--   Install and use [bazelisk][bazelisk]. Otherwise, make sure your bazel
-    version matches the one listed in the [.bazelversion](.bazelversion) file.
+[gVisor](https://gvisor.dev) is a userspace application kernel written in Go. It
+provides an OCI runtime named `runsc` and reduces the host-kernel surface exposed
+to sandboxed applications.
 
-After setting up dependencies, using Bazel is similar to the Makefile:
+Upstream documentation, architecture, security reporting, and community
+channels remain authoritative:
 
-```sh
-bazel build //runsc:runsc
-```
+- [Documentation](https://gvisor.dev/docs/)
+- [Source repository](https://github.com/google/gvisor)
+- [Security policy](SECURITY.md)
+- [Governance](GOVERNANCE.md)
+- [Contributing](CONTRIBUTING.md)
 
-### Testing
-
-To run standard test suites, you can use:
-
-```sh
-make unit-tests
-make tests
-```
-
-To run specific tests, you can specify the target:
-
-```sh
-# Makefile
-make test TARGETS="//runsc:version_test"
-# Bazel
-bazel test //runsc:version_test
-```
-
-### Mac OS
-
-Some packages support running tests directly on macOS. At the time of this
-writing, gVisor requires bazel 8, which you can install via homebrew:
-
-```sh
-brew install bazel@8
-
-# You can then run the tests, e.g.:
-$(brew --prefix bazel@8)/bin/bazel test --macos_sdk_version=$(xcrun --show-sdk-version) -- //tools/nogo/... //tools/check{aligned,const,escape,linkname,locks,unsafe}/...
-```
-
-### Using `go get`
-
-This project uses [bazel][bazel] to build and manage dependencies. A synthetic
-`go` branch is maintained that is compatible with standard `go` tooling for
-convenience.
-
-For example, to build and install `runsc` directly from this branch:
-
-```sh
-echo "module runsc" > go.mod
-GO111MODULE=on go get gvisor.dev/gvisor/runsc@go
-CGO_ENABLED=0 GO111MODULE=on sudo -E go build -o /usr/local/bin/runsc gvisor.dev/gvisor/runsc
-```
-
-Subsequently, you can build and install the shim binary for `containerd`:
-
-```sh
-GO111MODULE=on sudo -E go build -o /usr/local/bin/containerd-shim-runsc-v1 gvisor.dev/gvisor/shim
-```
-
-Note that this branch is supported in a best effort capacity, and direct
-development on this branch is not supported. Development should occur on the
-`master` branch, which is then reflected into the `go` branch.
-
-## Community & Governance
-
-See [GOVERNANCE.md](GOVERNANCE.md) for project governance information.
-
-The [gvisor-users mailing list][gvisor-users-list] and
-[gvisor-dev mailing list][gvisor-dev-list] are good starting points for
-questions and discussion.
-
-## Security Policy
-
-See [SECURITY.md](SECURITY.md).
-
-## Contributing
-
-See [Contributing.md](CONTRIBUTING.md).
-
-[bazel]: https://bazel.build
-[docker]: https://www.docker.com
-[gvisor-users-list]: https://groups.google.com/forum/#!forum/gvisor-users
-[gvisor-dev]: https://gvisor.dev
-[gvisor-dev-list]: https://groups.google.com/forum/#!forum/gvisor-dev
-[linux]: https://en.wikipedia.org/wiki/Linux_kernel_interfaces
-[oci]: https://www.opencontainers.org
-[old-linux]: https://gvisor.dev/docs/user_guide/networking/#gso
-[sandbox]: https://en.wikipedia.org/wiki/Sandbox_(computer_security)
-[bazelisk]: https://github.com/bazelbuild/bazelisk
+This fork retains the upstream Apache 2.0 license. See [LICENSE](LICENSE).

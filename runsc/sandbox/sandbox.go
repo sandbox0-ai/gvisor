@@ -1305,23 +1305,7 @@ func (s *Sandbox) createSandboxProcess(conf *config.Config, args *Args, startSyn
 		if err != nil {
 			return fmt.Errorf("getting raw cpu period from cgroups: %v", err)
 		}
-		if conf.CPUNumFromQuota && cpuQuota > 0 && cpuPeriod > 0 {
-			// Dropping below 2 CPUs can trigger application to disable
-			// locks that can lead do hard to debug errors, so just
-			// leaving two cores as reasonable default.
-			const minCPUs = 2
-
-			quota := float64(cpuQuota) / float64(cpuPeriod)
-			if n := int(math.Ceil(quota)); n > 0 {
-				if n < minCPUs {
-					n = minCPUs
-				}
-				if n < cpuNum {
-					// Only lower the cpu number.
-					cpuNum = n
-				}
-			}
-		}
+		cpuNum = applicationCoresFromQuota(cpuNum, cpuQuota, cpuPeriod, conf.CPUNumFromQuota)
 		cmd.Args = append(cmd.Args, "--cpu-num", strconv.Itoa(cpuNum))
 		if cpuQuota > 0 {
 			cmd.Args = append(cmd.Args, "--cpu-quota", strconv.FormatInt(cpuQuota, 10))
@@ -1390,6 +1374,97 @@ func (s *Sandbox) createSandboxProcess(conf *config.Config, args *Args, startSyn
 	s.Pid.Store(cmd.Process.Pid)
 	log.Infof("Sandbox started, PID: %d", cmd.Process.Pid)
 
+	return nil
+}
+
+func applicationCoresFromQuota(cpuNum int, cpuQuota, cpuPeriod int64, fromQuota bool) int {
+	if !fromQuota || cpuQuota <= 0 || cpuPeriod <= 0 {
+		return cpuNum
+	}
+
+	// Dropping below 2 CPUs can trigger applications to disable locks that can
+	// lead to hard-to-debug errors, so leave two cores as a reasonable minimum.
+	const minCPUs = 2
+	quotaCPUs := int(math.Ceil(float64(cpuQuota) / float64(cpuPeriod)))
+	if quotaCPUs < minCPUs {
+		quotaCPUs = minCPUs
+	}
+	if quotaCPUs < cpuNum {
+		return quotaCPUs
+	}
+	return cpuNum
+}
+
+// resourceValuesFromUpdate overlays explicitly updated OCI values on the
+// current host cgroup values.
+func resourceValuesFromUpdate(cpuQuota, cpuPeriod int64, hostMemory, cgroupMemory uint64, res *specs.LinuxResources) (int64, int64, uint64) {
+	totalMemory := min(hostMemory, cgroupMemory)
+	if res == nil {
+		return cpuQuota, cpuPeriod, totalMemory
+	}
+	if res.CPU != nil {
+		if res.CPU.Quota != nil && *res.CPU.Quota != 0 {
+			cpuQuota = *res.CPU.Quota
+		}
+		if res.CPU.Period != nil && *res.CPU.Period != 0 {
+			cpuPeriod = int64(*res.CPU.Period)
+		}
+	}
+	if res.Memory != nil && res.Memory.Limit != nil && *res.Memory.Limit != 0 {
+		totalMemory = hostMemory
+		if limit := *res.Memory.Limit; limit > 0 && uint64(limit) < totalMemory {
+			totalMemory = uint64(limit)
+		}
+	}
+	return cpuQuota, cpuPeriod, totalMemory
+}
+
+// UpdateResourceView refreshes the sandbox-visible CPU and memory values after
+// an OCI resource update. Explicit update values take precedence over host
+// cgroup values, which may be updated asynchronously by the caller.
+func (s *Sandbox) UpdateResourceView(conf *config.Config, containerID string, res *specs.LinuxResources) error {
+	if s.CgroupJSON.Cgroup == nil {
+		return nil
+	}
+
+	cpuNum, err := s.CgroupJSON.Cgroup.NumCPU()
+	if err != nil {
+		return fmt.Errorf("getting CPU count from cgroups: %w", err)
+	}
+	cpuQuota, err := s.CgroupJSON.Cgroup.CPUQuota()
+	if err != nil {
+		return fmt.Errorf("getting CPU quota from cgroups: %w", err)
+	}
+	cpuPeriod, err := s.CgroupJSON.Cgroup.CPUPeriod()
+	if err != nil {
+		return fmt.Errorf("getting CPU period from cgroups: %w", err)
+	}
+
+	hostMemory, err := hostos.TotalSystemMemory()
+	if err != nil {
+		return fmt.Errorf("getting total system memory: %w", err)
+	}
+	memoryLimit, err := s.CgroupJSON.Cgroup.MemoryLimit()
+	if err != nil {
+		return fmt.Errorf("getting memory limit from cgroups: %w", err)
+	}
+	cpuQuota, cpuPeriod, totalMemory := resourceValuesFromUpdate(cpuQuota, cpuPeriod, hostMemory, memoryLimit, res)
+
+	args := control.ResourcesUpdateArgs{
+		ApplicationCores: uint(applicationCoresFromQuota(cpuNum, cpuQuota, cpuPeriod, conf.CPUNumFromQuota)),
+		TotalMemoryBytes: totalMemory,
+		CPUQuotaMicros:   cpuQuota,
+		CPUPeriodMicros:  cpuPeriod,
+		CgroupPath:       "/" + containerID,
+	}
+	if err := s.call(boot.ResourcesUpdate, &args, nil); err != nil {
+		var remoteErr urpc.RemoteError
+		if errors.As(err, &remoteErr) && remoteErr.Message == urpc.ErrUnknownMethod.Error() {
+			log.Warningf("Sandbox %q was started by an older Sentry; skipping sandbox-visible resource refresh", s.ID)
+			return nil
+		}
+		return fmt.Errorf("updating sandbox resource view: %w", err)
+	}
 	return nil
 }
 

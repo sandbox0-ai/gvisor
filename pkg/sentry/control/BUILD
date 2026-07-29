@@ -32,6 +32,7 @@ go_library(
         "metrics.go",
         "pprof.go",
         "proc.go",
+        "resources.go",
         "state.go",
         "state_cuda.go",
         "tpu_control.go",
@@ -93,7 +94,10 @@ go_library(
 go_test(
     name = "control_test",
     size = "small",
-    srcs = ["proc_test.go"],
+    srcs = [
+        "proc_test.go",
+        "resources_test.go",
+    ],
     library = ":control",
     deps = [
         "//pkg/log",

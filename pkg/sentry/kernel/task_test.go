@@ -73,3 +73,68 @@ func TestTaskCPU(t *testing.T) {
 	}
 
 }
+
+func TestResizeCPUSet(t *testing.T) {
+	tests := []struct {
+		name     string
+		mask     sched.CPUSet
+		oldCores uint
+		newCores uint
+		wantCPUs []uint
+	}{
+		{
+			name:     "grow full mask",
+			mask:     sched.NewFullCPUSet(2),
+			oldCores: 2,
+			newCores: 4,
+			wantCPUs: []uint{0, 1, 2, 3},
+		},
+		{
+			name:     "grow explicit affinity",
+			mask:     cpuSetOf(2, 1),
+			oldCores: 2,
+			newCores: 4,
+			wantCPUs: []uint{1},
+		},
+		{
+			name:     "shrink full mask",
+			mask:     sched.NewFullCPUSet(4),
+			oldCores: 4,
+			newCores: 2,
+			wantCPUs: []uint{0, 1},
+		},
+		{
+			name:     "shrink removes entire affinity",
+			mask:     cpuSetOf(4, 3),
+			oldCores: 4,
+			newCores: 2,
+			wantCPUs: []uint{0},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := resizeCPUSet(test.mask, test.oldCores, test.newCores)
+			var gotCPUs []uint
+			got.ForEachCPU(func(cpu uint) {
+				gotCPUs = append(gotCPUs, cpu)
+			})
+			if len(gotCPUs) != len(test.wantCPUs) {
+				t.Fatalf("resizeCPUSet() CPUs = %v, want %v", gotCPUs, test.wantCPUs)
+			}
+			for i := range gotCPUs {
+				if gotCPUs[i] != test.wantCPUs[i] {
+					t.Fatalf("resizeCPUSet() CPUs = %v, want %v", gotCPUs, test.wantCPUs)
+				}
+			}
+		})
+	}
+}
+
+func cpuSetOf(size uint, cpus ...uint) sched.CPUSet {
+	set := sched.NewCPUSet(size)
+	for _, cpu := range cpus {
+		set.Set(cpu)
+	}
+	return set
+}
