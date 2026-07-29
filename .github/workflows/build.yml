@@ -3,7 +3,8 @@ name: CI
 "on":
   push:
     branches:
-      - "*"
+      - "**"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,13 +24,31 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v5
 
-    - name: build
+    - name: Build release layout
       run: |
-          mkdir -p bin
-          make copy TARGETS=runsc DESTINATION=bin/
+        mkdir -p bin dist
+        make copy TARGETS="//:release" DESTINATION=bin/
+        (
+          cd bin
+          sha256sum \
+            runsc \
+            containerd-shim-runsc-v1 \
+            gvisor-bin/checkpointgofer \
+            gvisor-bin/runsc-metric-server > SHA256SUMS
+          tar -czf ../dist/gvisor-release-linux-x86_64.tar.gz \
+            runsc \
+            containerd-shim-runsc-v1 \
+            gvisor-bin \
+            SHA256SUMS
+        )
+        (
+          cd dist
+          sha256sum gvisor-release-linux-x86_64.tar.gz \
+            > gvisor-release-linux-x86_64.tar.gz.sha256
+        )
 
-    - name: Upload runsc
+    - name: Upload release candidate
       uses: actions/upload-artifact@v4
       with:
-          name: runsc
-          path: bin/runsc
+        name: gvisor-release-linux-x86_64
+        path: dist/

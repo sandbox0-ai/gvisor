@@ -22,7 +22,6 @@ import (
 	"gvisor.dev/gvisor/pkg/sentry/socket/netlink/nlmsg"
 	"gvisor.dev/gvisor/pkg/syserr"
 	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
 )
 
 // metaLoad is an operation that loads specific meta data into a register.
@@ -157,11 +156,31 @@ func (op metaLoad) evaluate(regs *registerSet, evalCtx opEvalCtx) {
 		now := clock.Now()
 		secs := now.Hour()*3600 + now.Minute()*60 + now.Second()
 		target = binary.NativeEndian.AppendUint32(nil, uint32(secs))
+
+	// Output Interface Name (string, host order).
+	case linux.NFT_META_OIFNAME:
+		dst := regs.data[op.dregIdx:]
+		clear(dst[:linux.IFNAMSIZ])
+		if evalCtx.route != nil {
+			nic := evalCtx.route.OutgoingNIC()
+			name := evalCtx.nftState.stack.FindNICNameFromID(nic)
+			copy(dst, name)
+		}
+		return
+
+	// Input Interface Name (string, host order).
+	case linux.NFT_META_IIFNAME:
+		nic := pkt.InputNICID
+		name := evalCtx.nftState.stack.FindNICNameFromID(nic)
+		dst := regs.data[op.dregIdx:]
+		clear(dst[:linux.IFNAMSIZ])
+		copy(dst, name)
+		return
 	}
 
 	// Breaks if could not retrieve meta data.
 	if target == nil {
-		regs.verdict = stack.NFVerdict{Code: VC(linux.NFT_BREAK)}
+		regs.verdict = Verdict{Code: VC(linux.NFT_BREAK)}
 		return
 	}
 
@@ -184,7 +203,7 @@ func (op metaLoad) GetExprName() string {
 func (op metaLoad) Dump() ([]byte, *syserr.AnnotatedError) {
 	m := &nlmsg.Message{}
 	m.PutAttr(linux.NFTA_META_KEY, nlmsg.PutU32(uint32(op.key)))
-	m.PutAttr(linux.NFTA_META_DREG, nlmsg.PutU32(formatRegIdxForDump(op.dregIdx)))
+	m.PutAttr(linux.NFTA_META_DREG, formatRegIdxForDump(op.dregIdx))
 	return m.Buffer(), nil
 }
 

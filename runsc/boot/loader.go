@@ -325,6 +325,12 @@ type Loader struct {
 	// fsSaveCheckpointGofer is true if fsSaveFDs contains only one FD, which
 	// is a socket connected to a checkpoint gofer.
 	fsSaveCheckpointGofer bool
+
+	// hostinetNetDevFile is the pre-opened /proc/net/dev file for hostinet restore.
+	hostinetNetDevFile *os.File
+
+	// hostinetNetSNMPFile is the pre-opened /proc/net/snmp file for hostinet restore.
+	hostinetNetSNMPFile *os.File
 }
 
 // execID uniquely identifies a sentry process that is executed in a container.
@@ -824,6 +830,13 @@ func New(args Args) (*Loader, error) {
 
 // ConfigureNetwork implements inet.NetworkArgs.ConfigureNetwork.
 func (l *Loader) ConfigureNetwork(s inet.Stack) error {
+	if h, ok := s.(*hostinet.Stack); ok {
+		h.SetFiles(l.hostinetNetDevFile, l.hostinetNetSNMPFile)
+		l.hostinetNetDevFile = nil
+		l.hostinetNetSNMPFile = nil
+		return nil
+	}
+
 	if l.networkArgs == nil {
 		return nil
 	}
@@ -845,7 +858,7 @@ func (l *Loader) ConfigureNetwork(s inet.Stack) error {
 		eps.Stack.SetIPTables(netfilter.DefaultLinuxTables(eps.Stack.Clock(), eps.Stack.InsecureRNG()))
 	}
 	if nftables.IsNFTablesEnabled() && eps.Stack.NFTables() == nil {
-		eps.Stack.SetNFTables(nftables.NewNFTables(eps.Stack.Clock(), eps.Stack.SecureRNG()))
+		eps.Stack.SetNFTables(nftables.NewNFTables(eps.Stack, eps.Stack.Clock(), eps.Stack.SecureRNG()))
 	}
 	n := &Network{
 		Stack:  eps.Stack,
@@ -1786,7 +1799,7 @@ func (c *sandboxNetstackCreator) newEmptySandboxNetworkStack() (*netstack.Stack,
 	}), c.uid.UniqueID())
 
 	if nftables.IsNFTablesEnabled() {
-		s.Stack.SetNFTables(nftables.NewNFTables(c.clock, s.Stack.SecureRNG()))
+		s.Stack.SetNFTables(nftables.NewNFTables(s.Stack, c.clock, s.Stack.SecureRNG()))
 	}
 
 	// Enable SACK Recovery.

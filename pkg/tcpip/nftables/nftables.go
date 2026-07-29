@@ -195,7 +195,6 @@ func (nf *NFTables) getExtraEvaluators(family stack.AddressFamily, hook stack.NF
 						return syserr.NewAnnotatedError(syserr.ErrInvalidArgument, fmt.Sprintf("Nftables: failed to finalize connTrack for packet: %v", pkt))
 					}
 				}
-				regs.verdict.Code = VC(linux.NFT_CONTINUE)
 				return nil
 			}})
 	}
@@ -247,7 +246,7 @@ func (nf *NFTables) getBaseChainsForEvaluation(family stack.AddressFamily, hook 
 // in place.
 // Returns an error if address family or hook is invalid or they don't match.
 // TODO(b/345684870): Consider removing error case if we never return an error.
-func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, pkt *stack.PacketBuffer, route *stack.Route) (stack.NFVerdict, *syserr.AnnotatedError) {
+func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, pkt *stack.PacketBuffer, route *stack.Route) (Verdict, *syserr.AnnotatedError) {
 	// Note: none of the other evaluate functions are public because they require
 	// jumping to different chains in the same table, so all chains, rules, and
 	// operations must be tied to a table. Thus, calling evaluate for standalone
@@ -255,17 +254,17 @@ func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, 
 
 	// Ensures address family is valid.
 	if err := validateAddressFamily(family); err != nil {
-		return stack.NFVerdict{}, err
+		return Verdict{}, err
 	}
 
 	// Ensures hook is valid.
 	if err := validateHook(hook, family); err != nil {
-		return stack.NFVerdict{}, err
+		return Verdict{}, err
 	}
 
 	baseChains, err := nf.getBaseChainsForEvaluation(family, hook, false /* natChains */)
 	if err != nil {
-		return stack.NFVerdict{}, err
+		return Verdict{}, err
 	}
 
 	// Create a new register set for the evaluation.
@@ -279,7 +278,7 @@ func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, 
 
 	// If there's nothing to evaluate, return accept.
 	if numBaseChains == 0 && numExtraHooks == 0 {
-		return stack.NFVerdict{Code: VC(linux.NF_ACCEPT)}, nil
+		return Verdict{Code: VC(linux.NF_ACCEPT)}, nil
 	}
 	var lastEvaluatedChain *Chain
 	evalCtx := opEvalCtx{
@@ -293,7 +292,7 @@ func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, 
 		selectExtra := (ci == numBaseChains) || (ei < numExtraHooks && extraEvaluators[ei].priority < baseChains[ci].GetBaseChainInfo().Priority.GetValue())
 		if selectExtra {
 			if err := extraEvaluators[ei].handle(); err != nil {
-				return stack.NFVerdict{}, err
+				return Verdict{}, err
 			}
 			ei++
 		} else {
@@ -304,7 +303,7 @@ func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, 
 				continue
 			}
 			if err := bc.evaluate(&regs, evalCtx); err != nil {
-				return stack.NFVerdict{}, err
+				return Verdict{}, err
 			}
 			lastEvaluatedChain = bc
 		}
@@ -320,11 +319,11 @@ func (nf *NFTables) EvaluateHook(family stack.AddressFamily, hook stack.NFHook, 
 	switch regs.Verdict().Code {
 	case VC(linux.NFT_CONTINUE), VC(linux.NFT_RETURN):
 		if lastEvaluatedChain != nil && lastEvaluatedChain.GetBaseChainInfo().PolicyDrop {
-			return stack.NFVerdict{Code: VC(linux.NF_DROP)}, nil
+			return Verdict{Code: VC(linux.NF_DROP)}, nil
 		}
-		return stack.NFVerdict{Code: VC(linux.NF_ACCEPT)}, nil
+		return Verdict{Code: VC(linux.NF_ACCEPT)}, nil
 	case VC(linux.NF_ACCEPT):
-		return stack.NFVerdict{Code: VC(linux.NF_ACCEPT)}, nil
+		return Verdict{Code: VC(linux.NF_ACCEPT)}, nil
 	}
 
 	panic(fmt.Sprintf("unexpected verdict from hook evaluation: %s", VerdictCodeToString(regs.Verdict().Code)))
@@ -417,14 +416,14 @@ func (r *Rule) evaluate(regs *registerSet, evalCtx opEvalCtx) *syserr.AnnotatedE
 // NewNFTables creates a new NFTables state object using the given clock for
 // timing operations.
 // Note: Expects random number generator to be initialized with a seed.
-func NewNFTables(clock tcpip.Clock, rng rand.RNG) *NFTables {
+func NewNFTables(stack *stack.Stack, clock tcpip.Clock, rng rand.RNG) *NFTables {
 	if clock == nil {
 		panic("nftables state must be initialized with a non-nil clock")
 	}
 	if rng.Reader == nil {
 		panic("nftables state must be initialized with a non-nil random number generator")
 	}
-	return &NFTables{clock: clock, startTime: clock.Now(), rng: rng, tableHandleCounter: atomicbitops.Uint64{}, genid: 1}
+	return &NFTables{stack: stack, clock: clock, startTime: clock.Now(), rng: rng, tableHandleCounter: atomicbitops.Uint64{}, genid: 1}
 }
 
 // GetGenID returns the generation ID for the NFTables object.
@@ -1367,7 +1366,7 @@ func (r *Rule) addOperation(op operation) *syserr.AnnotatedError {
 }
 
 // AddOpFromExprInfo adds an operation to the rule given the expression information.
-func (r *Rule) AddOpFromExprInfo(tab *Table, exprInfo ExprInfo) *syserr.AnnotatedError {
+func (r *Rule) AddOpFromExprInfo(nf *NFTables, tab *Table, exprInfo ExprInfo) *syserr.AnnotatedError {
 	// Centralized here so that operations can do their own validation when being created.
 	var op operation
 	var err *syserr.AnnotatedError
@@ -1379,6 +1378,10 @@ func (r *Rule) AddOpFromExprInfo(tab *Table, exprInfo ExprInfo) *syserr.Annotate
 		}
 	case OpTypePayload:
 		if op, err = initPayload(tab, exprInfo); err != nil {
+			return err
+		}
+	case OpTypeBitwise:
+		if op, err = initBitwise(tab, exprInfo); err != nil {
 			return err
 		}
 	case OpTypeMeta:
@@ -1401,9 +1404,26 @@ func (r *Rule) AddOpFromExprInfo(tab *Table, exprInfo ExprInfo) *syserr.Annotate
 		if op, err = initLookup(tab, exprInfo); err != nil {
 			return err
 		}
+	case OpTypeFIB:
+		if op, err = initFIB(tab, exprInfo); err != nil {
+			return err
+		}
+	case OpTypeCT:
+		if op, err = initCT(tab, exprInfo); err != nil {
+			return err
+		}
+	case OpTypeMasq:
+		if op, err = initMasqOp(tab, exprInfo); err != nil {
+			return err
+		}
 
 	default:
 		return syserr.NewAnnotatedError(syserr.ErrNoFileOrDir, fmt.Sprintf("Nftables: Unknown expression type not found: %s", exprInfo.ExprName))
+	}
+
+	if exprOpType == OpTypeCT || exprOpType == OpTypeNAT || exprOpType == OpTypeMasq {
+		// NAT and Masq operations require connection tracking.
+		nf.InitConnTrackOnce()
 	}
 
 	return r.addOperation(op)

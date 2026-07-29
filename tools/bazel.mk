@@ -297,7 +297,7 @@ bazel-image: load-default ## Ensures that the local builder exists.
 .PHONY: bazel-image
 
 ifneq (true,$(shell $(wrapper echo true)))
-bazel-server: bazel-image ## Ensures that the server exists.
+bazel-server: bazel-image ## Restart bazel server/container.
 ifneq (,$(PRE_BAZEL_INIT))
 	@$(call header,PRE_BAZEL_INIT)
 	@bash -euxo pipefail -c "$(PRE_BAZEL_INIT)"
@@ -332,6 +332,15 @@ endif
 # we make a non-phony version of bazel-server that can be included.
 bazel-server-inc: bazel-server
 
+ifneq (true,$(shell $(wrapper echo true)))
+ensure-bazel-server:  ## Ensures that the bazel server exists, else restart.
+	@$(DOCKER_CLI_PATH) inspect $(DOCKER_NAME) &>/dev/null || $(MAKE) bazel-server
+else
+ensure-bazel-server:
+	@
+endif
+.PHONY: ensure-bazel-server
+
 # build_paths extracts the built binary from the bazel stderr output.
 #
 # The last line is used to prevent terminal shenanigans.
@@ -346,7 +355,7 @@ build_paths = \
 
 clean = $(call header,CLEAN) && $(call wrapper,$(BAZEL) clean)
 build = $(call header,BUILD $(1)) && $(call build_paths,$(1),echo {})
-copy  = $(call header,COPY $(1) $(2)) && $(call build_paths,$(1),cp -fa {} $(2))
+copy  = $(call header,COPY $(1) $(2)) && $(call build_paths,$(1),cp -fa {} $(2) && if test -d {}; then chmod -R u+w "$(2)/$$(basename {})"; fi)
 run   = $(call header,RUN $(1) $(2)) && $(call build_paths,$(1),{} $(2))
 sudo  = $(call header,SUDO $(1) $(2)) && $(call build_paths,$(1),sudo -E {} $(2))
 test  = $(call header,TEST $(1)) && $(call wrapper,$(BAZEL) test --strip=never $(BAZEL_OPTIONS) $(TEST_OPTIONS) $(1))
