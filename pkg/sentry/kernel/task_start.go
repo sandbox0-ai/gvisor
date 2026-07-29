@@ -87,6 +87,9 @@ type TaskConfig struct {
 	// IPCNamespace is the IPCNamespace of the new task.
 	IPCNamespace *IPCNamespace
 
+	// CgroupNamespace is the CgroupNamespace of the new task.
+	CgroupNamespace *CgroupNamespace
+
 	// MountNamespace is the MountNamespace of the new task.
 	MountNamespace *vfs.MountNamespace
 
@@ -141,6 +144,7 @@ func (ts *TaskSet) NewTask(ctx context.Context, cfg *TaskConfig) (*Task, error) 
 		cfg.FDTable.DecRef(ctx)
 		cfg.UTSNamespace.DecRef(ctx)
 		cfg.IPCNamespace.DecRef(ctx)
+		cfg.CgroupNamespace.DecRef(ctx)
 		cfg.NetworkNamespace.DecRef(ctx)
 		if cfg.MountNamespace != nil {
 			cfg.MountNamespace.DecRef(ctx)
@@ -177,6 +181,7 @@ func (ts *TaskSet) newTask(ctx context.Context, cfg *TaskConfig) (*Task, error) 
 		if err != nil {
 			return nil, err
 		}
+		srcCgroupNS := srcT.CgroupNamespace()
 		// We must lock the cgroup2 tree down to avoid racing with another
 		// thread that might destroy the destination cgroup. Note that we
 		// only lock this after we have extracted the destination cgroup to
@@ -190,7 +195,7 @@ func (ts *TaskSet) newTask(ctx context.Context, cfg *TaskConfig) (*Task, error) 
 			// committing the entry of the new task into the cgroup.
 			srcT.k.Cgroup2FS().RUnlockTree()
 		})
-		if err := c.CanCloneInto(ctx, srcT.Credentials()); err != nil {
+		if err := c.CanCloneInto(ctx, srcT.Credentials(), srcCgroupNS); err != nil {
 			return nil, err
 		}
 		cgroup2 = c
@@ -216,6 +221,7 @@ func (ts *TaskSet) newTask(ctx context.Context, cfg *TaskConfig) (*Task, error) 
 		niceness:        cfg.Niceness,
 		utsns:           cfg.UTSNamespace,
 		ipcns:           cfg.IPCNamespace,
+		cgroupns:        cfg.CgroupNamespace,
 		mountNamespace:  cfg.MountNamespace,
 		rseqCPU:         -1,
 		rseqAddr:        cfg.RSeqAddr,

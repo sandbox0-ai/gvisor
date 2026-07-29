@@ -11,7 +11,7 @@ This README is the inventory of those changes. Before replacing a Sandbox0
 runtime with an official gVisor build, review the fork delta and complete the
 replacement checks below.
 
-The fork was last compared with upstream `master` at
+The fork was last compared and synchronized with upstream `master` at
 [`43396a1925`](https://github.com/google/gvisor/commit/43396a19255cdbaa230c4cfbffc2f8e2aff5f6b1)
 on July 29, 2026. Neither runtime change listed below had an equivalent
 implementation at that revision.
@@ -103,7 +103,8 @@ Before switching to an official gVisor release:
    the measured performance regression.
 3. Confirm that `runsc update` propagates CPU and memory changes into the
    running Sentry and all application-visible interfaces listed above.
-4. Build `runsc` and `containerd-shim-runsc-v1` from the same upstream commit.
+4. Build `runsc`, `containerd-shim-runsc-v1`, and the expected sidecar binaries
+   from the same upstream commit.
 5. Run the focused tests and the remote Kubernetes smoke test below.
 6. Update this README with the upstream commit or release that supersedes each
    fork change before removing it.
@@ -155,13 +156,17 @@ included in the pinned release or deliberately backported.
 ## Build and Test
 
 gVisor uses Bazel, with `make` wrappers that run the canonical build container.
-Build matched runtime binaries from the same commit:
+Build `runsc`, the containerd shim, and matched sidecar binaries from the same
+commit:
 
 ```sh
 mkdir -p bin
-make copy TARGETS="//runsc:runsc" DESTINATION=bin/
-make copy TARGETS="//shim:containerd-shim-runsc-v1" DESTINATION=bin/
+make copy TARGETS="//:release" DESTINATION=bin/
 ```
+
+The output contains `runsc`, `containerd-shim-runsc-v1`, and the `gvisor-bin/`
+sidecar directory. Keep them together when packaging the runtime; current
+upstream runsc versions enforce matching sidecar releases.
 
 Relevant focused tests for the fork delta include:
 

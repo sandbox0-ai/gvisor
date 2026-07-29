@@ -78,6 +78,7 @@ syscall_test(
 syscall_test(
     size = "large",
     mount_cgroup_v2 = True,
+    shard_count = more_shards,
     test = "//test/syscalls/linux:cgroup2_test",
 )
 
@@ -294,6 +295,7 @@ syscall_test(
 )
 
 syscall_test(
+    add_fusefs = True,
     add_overlay = True,
     shard_count = most_shards,
     test = "//test/syscalls/linux:getdents_test",
@@ -356,6 +358,11 @@ syscall_test(
 
 syscall_test(
     test = "//test/syscalls/linux:kill_test",
+)
+
+syscall_test(
+    add_overlay = True,
+    test = "//test/syscalls/linux:landlock_test",
 )
 
 syscall_test(

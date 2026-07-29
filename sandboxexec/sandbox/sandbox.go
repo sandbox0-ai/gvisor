@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,10 @@ type Options struct {
 	enableNetworking bool
 	mounts           []Mount
 	snapshot         *Snapshot
+	env              []string
+	err              error
+	workingDir       string
+	hostname         string
 }
 
 // Option configures the Options struct.
@@ -49,6 +54,8 @@ const (
 	MountTypeBind MountType = iota
 	// MountTypeTmpfs represents an in-memory tmpfs mount.
 	MountTypeTmpfs
+	// MountTypeProc represents a procfs mount.
+	MountTypeProc
 )
 
 // Mount holds settings for a custom host bind directory or in-memory mount.
@@ -102,12 +109,62 @@ func WithTmpfsMount(destination string) Option {
 	}
 }
 
+// WithProcMount adds a procfs mount at the destination path inside the sandbox.
+func WithProcMount(destination string) Option {
+	return func(o *Options) {
+		o.mounts = append(o.mounts, Mount{
+			Destination: filepath.Clean(destination),
+			Type:        MountTypeProc,
+		})
+	}
+}
+
+// WithHostname sets the hostname for the sandbox.
+func WithHostname(hostname string) Option {
+	return func(o *Options) {
+		o.hostname = hostname
+	}
+}
+
 // WithSnapshot configures the sandbox to restore state from the given snapshot.
 // The sandbox automatically reads the snapshot metadata to determine if it is a
 // full Checkpoint/Restore, Filesystem snapshot, or Rootfs Tar snapshot.
 func WithSnapshot(snapshot *Snapshot) Option {
 	return func(o *Options) {
 		o.snapshot = snapshot
+	}
+}
+
+// WithEnv sets one or more environment variables in the sandbox process.
+// Each env string must be in the "KEY=VALUE" format.
+func WithEnv(envs ...string) Option {
+	return func(o *Options) {
+		for _, env := range envs {
+			if !strings.Contains(env, "=") {
+				o.err = fmt.Errorf("invalid environment variable format, expected KEY=VALUE: %q", env)
+				return
+			}
+		}
+		o.env = append(o.env, envs...)
+	}
+}
+
+// WithWorkingDir sets the current working directory for the sandbox process.
+// If the path is relative, it will be resolved as an absolute path from the root directory "/".
+// This is not a bind mount; it is simply setting the cwd inside the sandbox process.
+// Defaults to "/".
+func WithWorkingDir(cwd string) Option {
+	return func(o *Options) {
+		if cwd == "" {
+			o.err = fmt.Errorf("working directory cannot be empty")
+			return
+		}
+		// ensure absolute path inside sandbox
+		if !filepath.IsAbs(cwd) {
+			cwd = filepath.Join("/", cwd)
+		}
+		cwd = filepath.Clean(cwd)
+		o.workingDir = cwd
 	}
 }
 
@@ -148,9 +205,14 @@ func runscPath() string {
 func New(ctx context.Context, opts ...Option) (*Sandbox, error) {
 	options := Options{
 		enableNetworking: true,
+		workingDir:       "/",
 	}
 	for _, o := range opts {
 		o(&options)
+	}
+
+	if options.err != nil {
+		return nil, options.err
 	}
 
 	if options.runtimeDir == "" {
@@ -211,8 +273,12 @@ func New(ctx context.Context, opts ...Option) (*Sandbox, error) {
 		// Perform restore based on type.
 		switch meta.Type {
 		case RootfsTarSnapshot:
-			tarPath := filepath.Join(stateDir, "rootfs.tar")
-			// TODO: Download RootfsAsset from store to tarPath.
+			tarPath, err := readRootfsTar(ctx, snapshotID, store)
+			if err != nil {
+				return nil, err
+			}
+			defer os.Remove(tarPath)
+
 			annotations = map[string]string{
 				"dev.gvisor.tar.rootfs.upper": tarPath,
 			}
@@ -235,8 +301,16 @@ func New(ctx context.Context, opts ...Option) (*Sandbox, error) {
 			isCheckpointRestore = true
 		}
 	}
-
-	bundleDir, err := NewBundle(options.id, runDir, options.enableNetworking, options.mounts, annotations)
+	bundleDir, err := NewBundle(BundleConfig{
+		ID:               options.id,
+		RuntimeDir:       runDir,
+		EnableNetworking: options.enableNetworking,
+		Mounts:           options.mounts,
+		Env:              options.env,
+		Annotations:      annotations,
+		WorkingDir:       options.workingDir,
+		Hostname:         options.hostname,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OCI bundle: %v", err)
 	}
@@ -306,6 +380,10 @@ func (s *Sandbox) Close(ctx context.Context) error {
 		return fmt.Errorf("failed to clean up sandbox bundle directory: %v", err)
 	}
 
+	if err := os.RemoveAll(s.rootState); err != nil {
+		return fmt.Errorf("failed to clean up sandbox state directory: %v", err)
+	}
+
 	return nil
 }
 
@@ -352,8 +430,9 @@ func (s *Sandbox) Snapshot(ctx context.Context, snapshotType SnapshotType, stora
 
 	switch snapshotType {
 	case RootfsTarSnapshot:
-		// TODO: Run `runsc tar rootfs-upper --file=<localTempTar> <sandboxID>`.
-		// TODO: Upload `<localTempTar>` to storage with asset name RootfsAsset.
+		if err := s.snapshotRootfsTar(ctx, snapshotID, storage); err != nil {
+			return nil, err
+		}
 
 	case FilesystemSnapshot:
 		// TODO: Run `runsc fscheckpoint --image-path=<localTempDir> [--leave-running] <sandboxID>`.
@@ -383,4 +462,67 @@ func (s *Sandbox) Snapshot(ctx context.Context, snapshotType SnapshotType, stora
 		ID:      snapshotID,
 		Storage: storage,
 	}, nil
+}
+
+func (s *Sandbox) snapshotRootfsTar(ctx context.Context, snapshotID SnapshotID, storage SnapshotStorage) error {
+	tarFile, err := os.CreateTemp(os.TempDir(), "rootfs-*.tar")
+	if err != nil {
+		return fmt.Errorf("failed to create temp tar file: %w", err)
+	}
+	tarPath := tarFile.Name()
+	tarFile.Close()
+	defer os.Remove(tarPath)
+
+	cmd := exec.CommandContext(ctx, s.runscPath, "--root", s.rootState, "tar", "rootfs-upper", "--file", tarPath, s.id)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("runsc tar failed: %v (stderr: %q)", err, stderr.String())
+	}
+
+	localFile, err := os.Open(tarPath)
+	if err != nil {
+		return fmt.Errorf("failed to open temp tar file: %w", err)
+	}
+	defer localFile.Close()
+
+	storageWriter, err := storage.PutWriter(ctx, snapshotID, RootfsAsset)
+	if err != nil {
+		return fmt.Errorf("failed to create storage writer: %w", err)
+	}
+	defer storageWriter.Close()
+
+	if _, err := io.Copy(storageWriter, localFile); err != nil {
+		return fmt.Errorf("failed to upload rootfs tar: %w", err)
+	}
+	return nil
+}
+
+func readRootfsTar(ctx context.Context, snapshotID SnapshotID, store SnapshotStorage) (string, error) {
+	tarFile, err := os.CreateTemp(os.TempDir(), "rootfs-*.tar")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp tar file: %w", err)
+	}
+	tarPath := tarFile.Name()
+	defer tarFile.Close()
+
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.Remove(tarPath)
+		}
+	}()
+
+	storageReader, err := store.GetReader(ctx, snapshotID, RootfsAsset)
+	if err != nil {
+		return "", fmt.Errorf("failed to get rootfs reader from storage: %w", err)
+	}
+	defer storageReader.Close()
+
+	if _, err := io.Copy(tarFile, storageReader); err != nil {
+		return "", fmt.Errorf("failed to download rootfs asset: %w", err)
+	}
+
+	cleanup = false
+	return tarPath, nil
 }

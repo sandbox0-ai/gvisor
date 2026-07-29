@@ -893,8 +893,22 @@ func TestOptional(t *testing.T) {
 			}},
 			err: "HugepageLimits set but hugetlb cgroup controller not found",
 		},
+		{
+			name:  "blkio",
+			ctrlr: &blockIO{},
+			spec:  &specs.LinuxResources{BlockIO: &specs.LinuxBlockIO{Weight: uint16Ptr(1)}},
+			err:   "blkio controller is missing but limits are set in OCI spec",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if !tc.ctrlr.optional() {
+				t.Errorf("%s.optional() = false, want true", tc.name)
+			}
+			for _, emptySpec := range []*specs.LinuxResources{nil, {}} {
+				if err := tc.ctrlr.skip(emptySpec); err != nil {
+					t.Errorf("%s.skip(%+v) unexpected error: %v", tc.name, emptySpec, err)
+				}
+			}
 			err := tc.ctrlr.skip(tc.spec)
 			if err == nil {
 				t.Fatalf("ctrlr.skip() didn't fail")
@@ -955,5 +969,53 @@ func TestJSON(t *testing.T) {
 				t.Errorf("cgroup incorrectly deserialized from JSON: got %v, want %v", out.Cgroup, tc.cg)
 			}
 		}
+	}
+}
+
+func TestParseCgroupRoot(t *testing.T) {
+	testCases := []struct {
+		name      string
+		mountinfo string
+		want      string
+	}{
+		{
+			name:      "debian-v1",
+			mountinfo: debianMountinfo,
+			want:      "/sys/fs/cgroup",
+		},
+		{
+			name:      "dind-v1",
+			mountinfo: dindMountinfo,
+			want:      "/sys/fs/cgroup",
+		},
+		{
+			name:      "cgroup2-v2",
+			mountinfo: "1 2 0:3 / /sys/fs/cgroup rw shared:4 - cgroup2 cgroup2 rw,seclabel,nsdelegate",
+			want:      "/sys/fs/cgroup",
+		},
+		{
+			name:      "some-v1-controller-dir",
+			mountinfo: "4 5 0:6 / /dev/cgroup/memory rw shared:9 - cgroup cgroup rw,memory",
+			want:      "/dev/cgroup",
+		},
+		{
+			name:      "some-v1-root-dir",
+			mountinfo: "77 88 0:99 / /dev/cgroup rw shared:9 - cgroup cgroup rw,memory",
+			want:      "/dev/cgroup",
+		},
+		{
+			name:      "empty",
+			mountinfo: "",
+			want:      "/sys/fs/cgroup",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseCgroupRoot(strings.NewReader(tc.mountinfo))
+			if got != tc.want {
+				t.Errorf("parseCgroupRoot() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

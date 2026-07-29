@@ -246,6 +246,16 @@ steps:
     agents:
       arch: "amd64"
 
+  # Verify STAGED_BINARIES contents match the release tarball fileset.
+  # Runs only when `STAGED_BINARIES` is set (so cannot use `*source_test`).
+  - <<: *common
+    label: ":package: Staged binaries consistency check"
+    if: build.env("STAGED_BINARIES") != null
+    commands:
+      - make staged-binaries-check
+    agents:
+      arch: "amd64"
+
   # Images tests.
   - <<: *common
     label: ":docker: Images (x86_64)"
@@ -316,6 +326,7 @@ steps:
       <<: *platform_specific_agents
       <<: *kvm_agents
       arch: "amd64"
+      kernel: "modern"
   - <<: *common
     <<: *source_test
     label: ":muscle: System call tests (ARM64)"
@@ -331,6 +342,7 @@ steps:
     parallelism: 20
     agents:
       arch: "amd64"
+      kernel: "modern"
   # With Save Resume on ARM64.
   - <<: *common
     <<: *source_test_continuous
@@ -355,6 +367,7 @@ steps:
     <<: *docker
     <<: *source_test
     label: ":docker: Docker tests (cgroupv1)"
+    parallelism: 8
     command: make docker-tests
     agents:
       <<: *ubuntu_agents
@@ -366,6 +379,7 @@ steps:
     # See above: not truly a source test.
     <<: *source_test
     label: ":docker: Docker tests (cgroupv2)"
+    parallelism: 8
     command: make docker-tests
     agents:
       <<: *ubuntu_agents
@@ -373,7 +387,18 @@ steps:
       cgroup: "v2"
   - <<: *common
     <<: *docker
+    <<: *source_test
+    label: ":docker: Docker tests (ARM64)"
+    parallelism: 8
+    command: make docker-tests
+    agents:
+      <<: *ubuntu_agents
+      arch: "arm64"
+      cgroup: "v2"
+  - <<: *common
+    <<: *docker
     label: ":goggles: Overlay tests"
+    parallelism: 8
     command: make overlay-tests
     agents:
       <<: *platform_specific_agents
@@ -391,6 +416,7 @@ steps:
   - <<: *common
     <<: *docker
     label: ":safety_pin: Host network tests"
+    parallelism: 8
     command: make hostnet-tests
     agents:
       <<: *platform_specific_agents
@@ -400,6 +426,7 @@ steps:
   - <<: *common
     <<: *docker
     label: ":satellite: gVisor GSO tests"
+    parallelism: 8
     command: make swgso-tests
     agents:
       <<: *platform_specific_agents
@@ -424,6 +451,7 @@ steps:
     <<: *docker
     <<: *source_test
     label: ":person_in_lotus_position: KVM tests"
+    parallelism: 8
     command: make kvm-tests
     agents:
       <<: *kvm_agents
@@ -433,6 +461,7 @@ steps:
     <<: *docker
     <<: *source_test
     label: ":rocket: Systrap tests"
+    parallelism: 8
     command: make systrap-tests
     agents:
       <<: *kvm_agents
@@ -516,6 +545,7 @@ steps:
   - <<: *common
     <<: *source_test
     label: ":table_tennis_paddle_and_ball: IPTables tests"
+    parallelism: 8
     command: make iptables-tests
     agents:
       <<: *ubuntu_agents
@@ -553,6 +583,7 @@ steps:
     agents:
       <<: *platform_specific_agents
       arch: "amd64"
+      kernel: "modern"
   - <<: *common
     <<: *docker
     label: ":golang: Go runtime tests"
@@ -569,6 +600,7 @@ steps:
     agents:
       <<: *platform_specific_agents
       arch: "amd64"
+      kernel: "modern"
   - <<: *common
     <<: *docker
     label: ":python: Python runtime tests"
