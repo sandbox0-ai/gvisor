@@ -216,9 +216,9 @@ func cpuDir(ctx context.Context, fs *filesystem, creds *auth.Credentials) kernfs
 	k := kernel.KernelFromContext(ctx)
 	maxCPUCores := k.ApplicationCores()
 	children := map[string]kernfs.Inode{
-		"online":   fs.newCPUFile(ctx, creds, maxCPUCores, defaultSysMode),
-		"possible": fs.newCPUFile(ctx, creds, maxCPUCores, defaultSysMode),
-		"present":  fs.newCPUFile(ctx, creds, maxCPUCores, defaultSysMode),
+		"online":   fs.newCPUFile(ctx, creds, defaultSysMode),
+		"possible": fs.newCPUFile(ctx, creds, defaultSysMode),
+		"present":  fs.newCPUFile(ctx, creds, defaultSysMode),
 	}
 	// For consistency with /proc/cpuinfo, pretend all CPUs are in the same
 	// socket and each CPU is a distinct core.
@@ -433,18 +433,16 @@ func (d *cgroupDir) StatFS(ctx context.Context, fs *vfs.Filesystem) (linux.Statf
 type cpuFile struct {
 	implStatFS
 	kernfs.DynamicBytesFile
-
-	maxCores uint
 }
 
 // Generate implements vfs.DynamicBytesSource.Generate.
 func (c *cpuFile) Generate(ctx context.Context, buf *bytes.Buffer) error {
-	fmt.Fprintf(buf, "0-%d\n", c.maxCores-1)
+	fmt.Fprintf(buf, "0-%d\n", kernel.KernelFromContext(ctx).ApplicationCores()-1)
 	return nil
 }
 
-func (fs *filesystem) newCPUFile(ctx context.Context, creds *auth.Credentials, maxCores uint, mode linux.FileMode) kernfs.Inode {
-	c := &cpuFile{maxCores: maxCores}
+func (fs *filesystem) newCPUFile(ctx context.Context, creds *auth.Credentials, mode linux.FileMode) kernfs.Inode {
+	c := &cpuFile{}
 	c.DynamicBytesFile.Init(ctx, creds, linux.UNNAMED_MAJOR, fs.devMinor, fs.NextIno(), c, mode)
 	return c
 }

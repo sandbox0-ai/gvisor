@@ -219,11 +219,19 @@ func (k *Kernel) runCPUClockTicker() {
 	// Storage reused between iterations of the main loop:
 	var (
 		allTasks []*Task
-		incTasks = make([]*Task, k.applicationCores)
+		incTasks []*Task
 	)
 	concurrencyCount := k.ConcurrencyCount()
 
 	for {
+		applicationCores := int(k.ApplicationCores())
+		if cap(incTasks) < applicationCores {
+			incTasks = make([]*Task, applicationCores)
+		} else {
+			incTasks = incTasks[:applicationCores]
+			clear(incTasks)
+		}
+
 		// Stop CPU clocks while nothing is running.
 		if k.runningTasks.Load() == 0 {
 			k.runningTasksMu.Lock()
@@ -390,12 +398,12 @@ func (t *Task) CPUMask() sched.CPUSet {
 // Preconditions: mask.Size() ==
 // sched.CPUSetSize(t.Kernel().ApplicationCores()).
 func (t *Task) SetCPUMask(mask sched.CPUSet) error {
-	if want := sched.CPUSetSize(t.k.applicationCores); mask.Size() != want {
+	if want := sched.CPUSetSize(t.k.ApplicationCores()); mask.Size() != want {
 		panic(fmt.Sprintf("Invalid CPUSet %v (expected %d bytes)", mask, want))
 	}
 
 	// Remove CPUs in mask above Kernel.applicationCores.
-	mask.ClearAbove(t.k.applicationCores)
+	mask.ClearAbove(t.k.ApplicationCores())
 
 	// Ensure that at least 1 CPU is still allowed.
 	if mask.NumCPUs() == 0 {

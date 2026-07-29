@@ -2326,32 +2326,29 @@ func (i *tasksInode) StateLoad(ctx context.Context, stateSourceObject state.Sour
 	stateSourceObject.Load(14, &i.fakeCgroupControllers)
 }
 
-func (s *staticFileSetStat) StateTypeName() string {
-	return "pkg/sentry/fsimpl/proc.staticFileSetStat"
+func (c *cpuInfoData) StateTypeName() string {
+	return "pkg/sentry/fsimpl/proc.cpuInfoData"
 }
 
-func (s *staticFileSetStat) StateFields() []string {
+func (c *cpuInfoData) StateFields() []string {
 	return []string{
 		"dynamicBytesFileSetAttr",
-		"StaticData",
 	}
 }
 
-func (s *staticFileSetStat) beforeSave() {}
+func (c *cpuInfoData) beforeSave() {}
 
 // +checklocksignore
-func (s *staticFileSetStat) StateSave(stateSinkObject state.Sink) {
-	s.beforeSave()
-	stateSinkObject.Save(0, &s.dynamicBytesFileSetAttr)
-	stateSinkObject.Save(1, &s.StaticData)
+func (c *cpuInfoData) StateSave(stateSinkObject state.Sink) {
+	c.beforeSave()
+	stateSinkObject.Save(0, &c.dynamicBytesFileSetAttr)
 }
 
-func (s *staticFileSetStat) afterLoad(context.Context) {}
+func (c *cpuInfoData) afterLoad(context.Context) {}
 
 // +checklocksignore
-func (s *staticFileSetStat) StateLoad(ctx context.Context, stateSourceObject state.Source) {
-	stateSourceObject.Load(0, &s.dynamicBytesFileSetAttr)
-	stateSourceObject.Load(1, &s.StaticData)
+func (c *cpuInfoData) StateLoad(ctx context.Context, stateSourceObject state.Source) {
+	stateSourceObject.Load(0, &c.dynamicBytesFileSetAttr)
 }
 
 func (s *selfSymlink) StateTypeName() string {
@@ -3192,7 +3189,7 @@ func init() {
 	state.Register((*netRouteData)(nil))
 	state.Register((*netStatData)(nil))
 	state.Register((*tasksInode)(nil))
-	state.Register((*staticFileSetStat)(nil))
+	state.Register((*cpuInfoData)(nil))
 	state.Register((*selfSymlink)(nil))
 	state.Register((*threadSelfSymlink)(nil))
 	state.Register((*dynamicBytesFileSetAttr)(nil))

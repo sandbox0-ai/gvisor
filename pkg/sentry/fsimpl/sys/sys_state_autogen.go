@@ -292,7 +292,6 @@ func (c *cpuFile) StateFields() []string {
 	return []string{
 		"implStatFS",
 		"DynamicBytesFile",
-		"maxCores",
 	}
 }
 
@@ -303,7 +302,6 @@ func (c *cpuFile) StateSave(stateSinkObject state.Sink) {
 	c.beforeSave()
 	stateSinkObject.Save(0, &c.implStatFS)
 	stateSinkObject.Save(1, &c.DynamicBytesFile)
-	stateSinkObject.Save(2, &c.maxCores)
 }
 
 func (c *cpuFile) afterLoad(context.Context) {}
@@ -312,7 +310,6 @@ func (c *cpuFile) afterLoad(context.Context) {}
 func (c *cpuFile) StateLoad(ctx context.Context, stateSourceObject state.Source) {
 	stateSourceObject.Load(0, &c.implStatFS)
 	stateSourceObject.Load(1, &c.DynamicBytesFile)
-	stateSourceObject.Load(2, &c.maxCores)
 }
 
 func (i *implStatFS) StateTypeName() string {
