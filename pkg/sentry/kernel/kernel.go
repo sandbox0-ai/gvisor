@@ -177,7 +177,7 @@ type Kernel struct {
 	tasks                *TaskSet
 	rootUserNamespace    *auth.UserNamespace
 	rootNetworkNamespace *inet.Namespace
-	applicationCores     uint
+	applicationCores     atomicbitops.Uint64
 	useHostCores         bool
 	extraAuxv            []arch.AuxEntry
 	vdso                 *loader.VDSO
@@ -538,7 +538,7 @@ func (k *Kernel) Init(args InitKernelArgs) error {
 	k.cpuClockTickerWakeCh = make(chan struct{}, 1)
 	k.cpuClockTickerStopCond.L = &k.runningTasksMu
 	k.taskActivityCh = make(chan struct{})
-	k.applicationCores = args.ApplicationCores
+	k.applicationCores = atomicbitops.FromUint64(uint64(args.ApplicationCores))
 	if args.UseHostCores && k.HasCPUNumbers() {
 		args.UseHostCores = false
 		log.Infof("UseHostCores enabled but the platform implements HasCPUNumbers(): setting UseHostCores to false")
@@ -551,18 +551,18 @@ func (k *Kernel) Init(args InitKernelArgs) error {
 			return fmt.Errorf("failed to get maximum CPU number: %v", err)
 		}
 		minAppCores := uint(maxCPU) + 1
-		if k.applicationCores < minAppCores {
-			log.Infof("UseHostCores enabled: increasing ApplicationCores from %d to %d", k.applicationCores, minAppCores)
-			k.applicationCores = minAppCores
+		if applicationCores := k.ApplicationCores(); applicationCores < minAppCores {
+			log.Infof("UseHostCores enabled: increasing ApplicationCores from %d to %d", applicationCores, minAppCores)
+			k.applicationCores.Store(uint64(minAppCores))
 		}
 	}
 
 	if k.HasCPUNumbers() {
 		numCPUs := uint(k.NumCPUs())
-		if k.applicationCores < numCPUs {
-			log.Infof("ApplicationCores is less than NumCPUs: %d < %d", k.applicationCores, numCPUs)
+		if applicationCores := k.ApplicationCores(); applicationCores < numCPUs {
+			log.Infof("ApplicationCores is less than NumCPUs: %d < %d", applicationCores, numCPUs)
 			log.Infof("Setting applicationCores to NumCPUs: %d", numCPUs)
-			k.applicationCores = numCPUs
+			k.applicationCores.Store(uint64(numCPUs))
 		}
 	}
 
@@ -941,7 +941,7 @@ func (k *Kernel) LoadFrom(ctx context.Context, r io.Reader, asyncMFLoader *Async
 	k.cpuClockTickerStopCond.L = &k.runningTasksMu
 	k.taskActivityCh = make(chan struct{})
 
-	initAppCores := k.applicationCores
+	initAppCores := k.ApplicationCores()
 
 	// Load the pre-saved CPUID FeatureSet.
 	//
@@ -1026,8 +1026,8 @@ func (k *Kernel) LoadFrom(ctx context.Context, r io.Reader, asyncMFLoader *Async
 	// assignments, we can't tolerate an increase in the number of host CPUs,
 	// which could result in getcpu(2) returning CPUs that applications expect
 	// not to exist.
-	if k.useHostCores && initAppCores > k.applicationCores {
-		return fmt.Errorf("UseHostCores enabled: can't increase ApplicationCores from %d to %d after restore", k.applicationCores, initAppCores)
+	if applicationCores := k.ApplicationCores(); k.useHostCores && initAppCores > applicationCores {
+		return fmt.Errorf("UseHostCores enabled: can't increase ApplicationCores from %d to %d after restore", applicationCores, initAppCores)
 	}
 
 	return nil
@@ -1387,7 +1387,7 @@ func (k *Kernel) CreateProcess(args CreateProcessArgs) (*ThreadGroup, ThreadID, 
 		Credentials:      newCreds,
 		NoNewPrivs:       args.NoNewPrivs,
 		NetworkNamespace: k.RootNetworkNamespace(),
-		AllowedCPUMask:   sched.NewFullCPUSet(k.applicationCores),
+		AllowedCPUMask:   sched.NewFullCPUSet(k.ApplicationCores()),
 		UTSNamespace:     args.UTSNamespace,
 		IPCNamespace:     args.IPCNamespace,
 		MountNamespace:   mntns,
@@ -1879,7 +1879,61 @@ func (k *Kernel) TestOnlySetGlobalInit(tg *ThreadGroup) {
 // ApplicationCores returns the number of CPUs visible to sandboxed
 // applications.
 func (k *Kernel) ApplicationCores() uint {
-	return k.applicationCores
+	return uint(k.applicationCores.Load())
+}
+
+// SetApplicationCores changes the number of logical CPUs visible to
+// sandboxed applications. Existing tasks that could run on every previously
+// visible CPU are expanded to the new full CPU set. Explicit affinity masks
+// remain restricted to their existing CPUs.
+func (k *Kernel) SetApplicationCores(cores uint) error {
+	if cores == 0 {
+		return fmt.Errorf("application cores must be greater than zero")
+	}
+
+	k.extMu.Lock()
+	defer k.extMu.Unlock()
+
+	oldCores := k.ApplicationCores()
+	if oldCores == cores {
+		return nil
+	}
+	if k.useHostCores || k.HasCPUNumbers() {
+		// These modes report host or platform CPU numbers directly, so there is
+		// no virtual CPU set to resize.
+		return nil
+	}
+
+	k.tasks.mu.Lock()
+	defer k.tasks.mu.Unlock()
+
+	k.applicationCores.Store(uint64(cores))
+	for t := range k.tasks.Root.tids {
+		t.mu.Lock()
+		t.allowedCPUMask = resizeCPUSet(t.allowedCPUMask, oldCores, cores)
+		t.cpu.Store(assignCPU(t.allowedCPUMask, k.tasks.Root.tids[t]))
+		t.mu.Unlock()
+	}
+	return nil
+}
+
+func resizeCPUSet(mask sched.CPUSet, oldCores, newCores uint) sched.CPUSet {
+	resized := sched.NewCPUSet(newCores)
+	mask.ForEachCPU(func(cpu uint) {
+		if cpu < newCores {
+			resized.Set(cpu)
+		}
+	})
+
+	if newCores > oldCores && mask.NumCPUs() == oldCores {
+		for cpu := oldCores; cpu < newCores; cpu++ {
+			resized.Set(cpu)
+		}
+	}
+	if resized.NumCPUs() == 0 {
+		resized.Set(0)
+	}
+	return resized
 }
 
 // RealtimeClock returns the application CLOCK_REALTIME clock.

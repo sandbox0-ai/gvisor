@@ -64,25 +64,32 @@ func TestReadCPUFile(t *testing.T) {
 	s := newTestSystem(t, "" /*pciTestDir*/)
 	defer s.Destroy()
 	k := kernel.KernelFromContext(s.Ctx)
-	maxCPUCores := k.ApplicationCores()
-
-	expected := fmt.Sprintf("0-%d\n", maxCPUCores-1)
-
-	for _, fname := range []string{"online", "possible", "present"} {
-		pop := s.PathOpAtRoot(fmt.Sprintf("devices/system/cpu/%s", fname))
-		fd, err := s.VFS.OpenAt(s.Ctx, s.Creds, pop, &vfs.OpenOptions{})
-		if err != nil {
-			t.Fatalf("OpenAt(pop:%+v) = %+v failed: %v", pop, fd, err)
-		}
-		defer fd.DecRef(s.Ctx)
-		content, err := s.ReadToEnd(fd)
-		if err != nil {
-			t.Fatalf("Read failed: %v", err)
-		}
-		if diff := cmp.Diff(expected, content); diff != "" {
-			t.Fatalf("Read returned unexpected data:\n--- want\n+++ got\n%v", diff)
+	readCPUFiles := func(wantCores uint) {
+		t.Helper()
+		expected := fmt.Sprintf("0-%d\n", wantCores-1)
+		for _, fname := range []string{"online", "possible", "present"} {
+			pop := s.PathOpAtRoot(fmt.Sprintf("devices/system/cpu/%s", fname))
+			fd, err := s.VFS.OpenAt(s.Ctx, s.Creds, pop, &vfs.OpenOptions{})
+			if err != nil {
+				t.Fatalf("OpenAt(pop:%+v) = %+v failed: %v", pop, fd, err)
+			}
+			content, err := s.ReadToEnd(fd)
+			fd.DecRef(s.Ctx)
+			if err != nil {
+				t.Fatalf("Read failed: %v", err)
+			}
+			if diff := cmp.Diff(expected, content); diff != "" {
+				t.Fatalf("Read returned unexpected data:\n--- want\n+++ got\n%v", diff)
+			}
 		}
 	}
+
+	initialCores := k.ApplicationCores()
+	readCPUFiles(initialCores)
+	if err := k.SetApplicationCores(initialCores + 1); err != nil {
+		t.Fatalf("SetApplicationCores(%d): %v", initialCores+1, err)
+	}
+	readCPUFiles(initialCores + 1)
 }
 
 func TestSysRootContainsExpectedEntries(t *testing.T) {

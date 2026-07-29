@@ -178,6 +178,11 @@ const (
 	UsageUsageFD = "Usage.UsageFD"
 )
 
+// Resources related commands.
+const (
+	ResourcesUpdate = "Resources.Update"
+)
+
 // Metrics related commands (see metrics.go).
 const (
 	MetricsGetRegistered = "Metrics.GetRegisteredMetrics"
@@ -240,6 +245,7 @@ func (c *controller) registerHandlers() {
 	c.srv.Register(&control.Lifecycle{Kernel: l.k})
 	c.srv.Register(&control.Logging{})
 	c.srv.Register(&control.Proc{Kernel: l.k})
+	c.srv.Register(&control.Resources{Kernel: l.k})
 	c.srv.Register(&control.State{Kernel: l.k})
 	c.srv.Register(&control.Usage{Kernel: l.k})
 	c.srv.Register(&control.Metrics{})

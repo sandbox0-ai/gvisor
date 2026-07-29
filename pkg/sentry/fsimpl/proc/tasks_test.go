@@ -168,6 +168,37 @@ func TestTasksEmpty(t *testing.T) {
 	s.AssertDirentOffsets(collector, tasksStaticFilesNextOffs)
 }
 
+func TestCPUInfoReflectsApplicationCores(t *testing.T) {
+	s := setup(t)
+	defer s.Destroy()
+
+	readCPUInfo := func() string {
+		t.Helper()
+		fd, err := s.VFS.OpenAt(s.Ctx, s.Creds, s.PathOpAtRoot("/proc/cpuinfo"), &vfs.OpenOptions{})
+		if err != nil {
+			t.Fatalf("OpenAt(/proc/cpuinfo): %v", err)
+		}
+		content, err := s.ReadToEnd(fd)
+		fd.DecRef(s.Ctx)
+		if err != nil {
+			t.Fatalf("ReadToEnd(/proc/cpuinfo): %v", err)
+		}
+		return content
+	}
+
+	k := kernel.KernelFromContext(s.Ctx)
+	initialCores := k.ApplicationCores()
+	if got := strings.Count(readCPUInfo(), "processor\t:"); got != int(initialCores) {
+		t.Fatalf("/proc/cpuinfo processor count = %d, want %d", got, initialCores)
+	}
+	if err := k.SetApplicationCores(initialCores + 1); err != nil {
+		t.Fatalf("SetApplicationCores(%d): %v", initialCores+1, err)
+	}
+	if got := strings.Count(readCPUInfo(), "processor\t:"); got != int(initialCores+1) {
+		t.Fatalf("/proc/cpuinfo processor count after resize = %d, want %d", got, initialCores+1)
+	}
+}
+
 func TestTasksWithOverrideProc(t *testing.T) {
 	s := setupWithData(t, &InternalData{
 		Cgroups: map[string]string{

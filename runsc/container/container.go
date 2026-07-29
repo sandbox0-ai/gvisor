@@ -576,7 +576,7 @@ func Run(conf *config.Config, args Args) (unix.WaitStatus, error) {
 }
 
 // Update sets the resources of a running container as configured.
-func (c *Container) Update(res *specs.LinuxResources) error {
+func (c *Container) Update(conf *config.Config, res *specs.LinuxResources) error {
 	log.Debugf("Set resources for container, cid: %s", c.ID)
 	if err := c.requireStatus("set resources for", Created, Running); err != nil {
 		return err
@@ -598,6 +598,10 @@ func (c *Container) Update(res *specs.LinuxResources) error {
 			}
 			return err
 		}
+	}
+
+	if err := c.Sandbox.UpdateResourceView(conf, c.ID, res); err != nil {
+		return err
 	}
 
 	c.Spec.Linux.Resources = res
