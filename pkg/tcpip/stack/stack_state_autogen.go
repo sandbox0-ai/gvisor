@@ -283,6 +283,7 @@ func (ct *ConnTrack) StateTypeName() string {
 func (ct *ConnTrack) StateFields() []string {
 	return []string{
 		"seed",
+		"nftIDSeed",
 		"clock",
 		"buckets",
 	}
@@ -294,8 +295,9 @@ func (ct *ConnTrack) beforeSave() {}
 func (ct *ConnTrack) StateSave(stateSinkObject state.Sink) {
 	ct.beforeSave()
 	stateSinkObject.Save(0, &ct.seed)
-	stateSinkObject.Save(1, &ct.clock)
-	stateSinkObject.Save(2, &ct.buckets)
+	stateSinkObject.Save(1, &ct.nftIDSeed)
+	stateSinkObject.Save(2, &ct.clock)
+	stateSinkObject.Save(3, &ct.buckets)
 }
 
 func (ct *ConnTrack) afterLoad(context.Context) {}
@@ -303,8 +305,9 @@ func (ct *ConnTrack) afterLoad(context.Context) {}
 // +checklocksignore
 func (ct *ConnTrack) StateLoad(ctx context.Context, stateSourceObject state.Source) {
 	stateSourceObject.Load(0, &ct.seed)
-	stateSourceObject.Load(1, &ct.clock)
-	stateSourceObject.Load(2, &ct.buckets)
+	stateSourceObject.Load(1, &ct.nftIDSeed)
+	stateSourceObject.Load(2, &ct.clock)
+	stateSourceObject.Load(3, &ct.buckets)
 }
 
 func (bkt *bucket) StateTypeName() string {
@@ -1560,6 +1563,7 @@ func (pk *PacketBuffer) StateFields() []string {
 		"dnatDone",
 		"PktType",
 		"NICID",
+		"InputNICID",
 		"RXChecksumValidated",
 		"NetworkPacketInfo",
 		"Mark",
@@ -1588,10 +1592,11 @@ func (pk *PacketBuffer) StateSave(stateSinkObject state.Sink) {
 	stateSinkObject.Save(13, &pk.dnatDone)
 	stateSinkObject.Save(14, &pk.PktType)
 	stateSinkObject.Save(15, &pk.NICID)
-	stateSinkObject.Save(16, &pk.RXChecksumValidated)
-	stateSinkObject.Save(17, &pk.NetworkPacketInfo)
-	stateSinkObject.Save(18, &pk.Mark)
-	stateSinkObject.Save(19, &pk.tuple)
+	stateSinkObject.Save(16, &pk.InputNICID)
+	stateSinkObject.Save(17, &pk.RXChecksumValidated)
+	stateSinkObject.Save(18, &pk.NetworkPacketInfo)
+	stateSinkObject.Save(19, &pk.Mark)
+	stateSinkObject.Save(20, &pk.tuple)
 }
 
 func (pk *PacketBuffer) afterLoad(context.Context) {}
@@ -1614,10 +1619,11 @@ func (pk *PacketBuffer) StateLoad(ctx context.Context, stateSourceObject state.S
 	stateSourceObject.Load(13, &pk.dnatDone)
 	stateSourceObject.Load(14, &pk.PktType)
 	stateSourceObject.Load(15, &pk.NICID)
-	stateSourceObject.Load(16, &pk.RXChecksumValidated)
-	stateSourceObject.Load(17, &pk.NetworkPacketInfo)
-	stateSourceObject.Load(18, &pk.Mark)
-	stateSourceObject.Load(19, &pk.tuple)
+	stateSourceObject.Load(16, &pk.InputNICID)
+	stateSourceObject.Load(17, &pk.RXChecksumValidated)
+	stateSourceObject.Load(18, &pk.NetworkPacketInfo)
+	stateSourceObject.Load(19, &pk.Mark)
+	stateSourceObject.Load(20, &pk.tuple)
 }
 
 func (h *headerInfo) StateTypeName() string {

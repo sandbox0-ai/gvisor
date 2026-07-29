@@ -107,8 +107,18 @@ type ExecveInfo struct {
 	BinaryUid            uint32                 `protobuf:"varint,6,opt,name=binary_uid,json=binaryUid,proto3" json:"binary_uid,omitempty"`
 	BinaryGid            uint32                 `protobuf:"varint,7,opt,name=binary_gid,json=binaryGid,proto3" json:"binary_gid,omitempty"`
 	BinarySha256         []byte                 `protobuf:"bytes,8,opt,name=binary_sha256,json=binarySha256,proto3" json:"binary_sha256,omitempty"`
+	BinarySha1           []byte                 `protobuf:"bytes,16,opt,name=binary_sha1,json=binarySha1,proto3" json:"binary_sha1,omitempty"`
 	BinaryOverlayfsUpper bool                   `protobuf:"varint,9,opt,name=binary_overlayfs_upper,json=binaryOverlayfsUpper,proto3" json:"binary_overlayfs_upper,omitempty"`
+	BinaryOverlayfsLower bool                   `protobuf:"varint,15,opt,name=binary_overlayfs_lower,json=binaryOverlayfsLower,proto3" json:"binary_overlayfs_lower,omitempty"`
 	BinaryIno            uint64                 `protobuf:"varint,10,opt,name=binary_ino,json=binaryIno,proto3" json:"binary_ino,omitempty"`
+	BinaryCtime          *Timespec              `protobuf:"bytes,11,opt,name=binary_ctime,json=binaryCtime,proto3" json:"binary_ctime,omitempty"`
+	BinarySize           int64                  `protobuf:"varint,18,opt,name=binary_size,json=binarySize,proto3" json:"binary_size,omitempty"`
+	BinaryNlink          uint32                 `protobuf:"varint,19,opt,name=binary_nlink,json=binaryNlink,proto3" json:"binary_nlink,omitempty"`
+	BinaryInMemfd        bool                   `protobuf:"varint,20,opt,name=binary_in_memfd,json=binaryInMemfd,proto3" json:"binary_in_memfd,omitempty"`
+	Stdin                *FdInfo                `protobuf:"bytes,12,opt,name=stdin,proto3" json:"stdin,omitempty"`
+	Stdout               *FdInfo                `protobuf:"bytes,13,opt,name=stdout,proto3" json:"stdout,omitempty"`
+	Stderr               *FdInfo                `protobuf:"bytes,14,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	Execfn               string                 `protobuf:"bytes,17,opt,name=execfn,proto3" json:"execfn,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -199,9 +209,23 @@ func (x *ExecveInfo) GetBinarySha256() []byte {
 	return nil
 }
 
+func (x *ExecveInfo) GetBinarySha1() []byte {
+	if x != nil {
+		return x.BinarySha1
+	}
+	return nil
+}
+
 func (x *ExecveInfo) GetBinaryOverlayfsUpper() bool {
 	if x != nil {
 		return x.BinaryOverlayfsUpper
+	}
+	return false
+}
+
+func (x *ExecveInfo) GetBinaryOverlayfsLower() bool {
+	if x != nil {
+		return x.BinaryOverlayfsLower
 	}
 	return false
 }
@@ -211,6 +235,62 @@ func (x *ExecveInfo) GetBinaryIno() uint64 {
 		return x.BinaryIno
 	}
 	return 0
+}
+
+func (x *ExecveInfo) GetBinaryCtime() *Timespec {
+	if x != nil {
+		return x.BinaryCtime
+	}
+	return nil
+}
+
+func (x *ExecveInfo) GetBinarySize() int64 {
+	if x != nil {
+		return x.BinarySize
+	}
+	return 0
+}
+
+func (x *ExecveInfo) GetBinaryNlink() uint32 {
+	if x != nil {
+		return x.BinaryNlink
+	}
+	return 0
+}
+
+func (x *ExecveInfo) GetBinaryInMemfd() bool {
+	if x != nil {
+		return x.BinaryInMemfd
+	}
+	return false
+}
+
+func (x *ExecveInfo) GetStdin() *FdInfo {
+	if x != nil {
+		return x.Stdin
+	}
+	return nil
+}
+
+func (x *ExecveInfo) GetStdout() *FdInfo {
+	if x != nil {
+		return x.Stdout
+	}
+	return nil
+}
+
+func (x *ExecveInfo) GetStderr() *FdInfo {
+	if x != nil {
+		return x.Stderr
+	}
+	return nil
+}
+
+func (x *ExecveInfo) GetExecfn() string {
+	if x != nil {
+		return x.Execfn
+	}
+	return ""
 }
 
 type ExitNotifyParentInfo struct {
@@ -318,16 +398,19 @@ func (x *TaskExit) GetExitStatus() int32 {
 }
 
 type MmapInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ContextData   *ContextData           `protobuf:"bytes,1,opt,name=context_data,json=contextData,proto3" json:"context_data,omitempty"`
-	MappedPath    string                 `protobuf:"bytes,2,opt,name=mapped_path,json=mappedPath,proto3" json:"mapped_path,omitempty"`
-	MappedIno     uint64                 `protobuf:"varint,3,opt,name=mapped_ino,json=mappedIno,proto3" json:"mapped_ino,omitempty"`
-	MappedMode    uint32                 `protobuf:"varint,4,opt,name=mapped_mode,json=mappedMode,proto3" json:"mapped_mode,omitempty"`
-	MappedUid     uint32                 `protobuf:"varint,5,opt,name=mapped_uid,json=mappedUid,proto3" json:"mapped_uid,omitempty"`
-	MappedGid     uint32                 `protobuf:"varint,6,opt,name=mapped_gid,json=mappedGid,proto3" json:"mapped_gid,omitempty"`
-	IsInitialMmap bool                   `protobuf:"varint,7,opt,name=is_initial_mmap,json=isInitialMmap,proto3" json:"is_initial_mmap,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ContextData    *ContextData           `protobuf:"bytes,1,opt,name=context_data,json=contextData,proto3" json:"context_data,omitempty"`
+	MappedPath     string                 `protobuf:"bytes,2,opt,name=mapped_path,json=mappedPath,proto3" json:"mapped_path,omitempty"`
+	MappedIno      uint64                 `protobuf:"varint,3,opt,name=mapped_ino,json=mappedIno,proto3" json:"mapped_ino,omitempty"`
+	MappedMode     uint32                 `protobuf:"varint,4,opt,name=mapped_mode,json=mappedMode,proto3" json:"mapped_mode,omitempty"`
+	MappedUid      uint32                 `protobuf:"varint,5,opt,name=mapped_uid,json=mappedUid,proto3" json:"mapped_uid,omitempty"`
+	MappedGid      uint32                 `protobuf:"varint,6,opt,name=mapped_gid,json=mappedGid,proto3" json:"mapped_gid,omitempty"`
+	IsInitialMmap  bool                   `protobuf:"varint,7,opt,name=is_initial_mmap,json=isInitialMmap,proto3" json:"is_initial_mmap,omitempty"`
+	MappedCtime    *Timespec              `protobuf:"bytes,8,opt,name=mapped_ctime,json=mappedCtime,proto3" json:"mapped_ctime,omitempty"`
+	OverlayfsUpper bool                   `protobuf:"varint,9,opt,name=overlayfs_upper,json=overlayfsUpper,proto3" json:"overlayfs_upper,omitempty"`
+	OverlayfsLower bool                   `protobuf:"varint,10,opt,name=overlayfs_lower,json=overlayfsLower,proto3" json:"overlayfs_lower,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MmapInfo) Reset() {
@@ -409,6 +492,27 @@ func (x *MmapInfo) GetIsInitialMmap() bool {
 	return false
 }
 
+func (x *MmapInfo) GetMappedCtime() *Timespec {
+	if x != nil {
+		return x.MappedCtime
+	}
+	return nil
+}
+
+func (x *MmapInfo) GetOverlayfsUpper() bool {
+	if x != nil {
+		return x.OverlayfsUpper
+	}
+	return false
+}
+
+func (x *MmapInfo) GetOverlayfsLower() bool {
+	if x != nil {
+		return x.OverlayfsLower
+	}
+	return false
+}
+
 var File_pkg_sentry_seccheck_points_sentry_proto protoreflect.FileDescriptor
 
 const file_pkg_sentry_seccheck_points_sentry_proto_rawDesc = "" +
@@ -419,7 +523,7 @@ const file_pkg_sentry_seccheck_points_sentry_proto_rawDesc = "" +
 	"\x11created_thread_id\x18\x03 \x01(\x05R\x0fcreatedThreadId\x125\n" +
 	"\x17created_thread_group_id\x18\x04 \x01(\x05R\x14createdThreadGroupId\x12>\n" +
 	"\x1ccreated_thread_start_time_ns\x18\x05 \x01(\x03R\x18createdThreadStartTimeNs\x12\x14\n" +
-	"\x05flags\x18\x06 \x01(\x04R\x05flags\"\xeb\x02\n" +
+	"\x05flags\x18\x06 \x01(\x04R\x05flags\"\x8d\x06\n" +
 	"\n" +
 	"ExecveInfo\x12=\n" +
 	"\fcontext_data\x18\x01 \x01(\v2\x1a.gvisor.common.ContextDataR\vcontextData\x12\x1f\n" +
@@ -433,11 +537,23 @@ const file_pkg_sentry_seccheck_points_sentry_proto_rawDesc = "" +
 	"binary_uid\x18\x06 \x01(\rR\tbinaryUid\x12\x1d\n" +
 	"\n" +
 	"binary_gid\x18\a \x01(\rR\tbinaryGid\x12#\n" +
-	"\rbinary_sha256\x18\b \x01(\fR\fbinarySha256\x124\n" +
-	"\x16binary_overlayfs_upper\x18\t \x01(\bR\x14binaryOverlayfsUpper\x12\x1d\n" +
+	"\rbinary_sha256\x18\b \x01(\fR\fbinarySha256\x12\x1f\n" +
+	"\vbinary_sha1\x18\x10 \x01(\fR\n" +
+	"binarySha1\x124\n" +
+	"\x16binary_overlayfs_upper\x18\t \x01(\bR\x14binaryOverlayfsUpper\x124\n" +
+	"\x16binary_overlayfs_lower\x18\x0f \x01(\bR\x14binaryOverlayfsLower\x12\x1d\n" +
 	"\n" +
 	"binary_ino\x18\n" +
-	" \x01(\x04R\tbinaryIno\"v\n" +
+	" \x01(\x04R\tbinaryIno\x12:\n" +
+	"\fbinary_ctime\x18\v \x01(\v2\x17.gvisor.common.TimespecR\vbinaryCtime\x12\x1f\n" +
+	"\vbinary_size\x18\x12 \x01(\x03R\n" +
+	"binarySize\x12!\n" +
+	"\fbinary_nlink\x18\x13 \x01(\rR\vbinaryNlink\x12&\n" +
+	"\x0fbinary_in_memfd\x18\x14 \x01(\bR\rbinaryInMemfd\x12+\n" +
+	"\x05stdin\x18\f \x01(\v2\x15.gvisor.common.FdInfoR\x05stdin\x12-\n" +
+	"\x06stdout\x18\r \x01(\v2\x15.gvisor.common.FdInfoR\x06stdout\x12-\n" +
+	"\x06stderr\x18\x0e \x01(\v2\x15.gvisor.common.FdInfoR\x06stderr\x12\x16\n" +
+	"\x06execfn\x18\x11 \x01(\tR\x06execfn\"v\n" +
 	"\x14ExitNotifyParentInfo\x12=\n" +
 	"\fcontext_data\x18\x01 \x01(\v2\x1a.gvisor.common.ContextDataR\vcontextData\x12\x1f\n" +
 	"\vexit_status\x18\x02 \x01(\x05R\n" +
@@ -445,7 +561,7 @@ const file_pkg_sentry_seccheck_points_sentry_proto_rawDesc = "" +
 	"\bTaskExit\x12=\n" +
 	"\fcontext_data\x18\x01 \x01(\v2\x1a.gvisor.common.ContextDataR\vcontextData\x12\x1f\n" +
 	"\vexit_status\x18\x02 \x01(\x05R\n" +
-	"exitStatus\"\x90\x02\n" +
+	"exitStatus\"\x9e\x03\n" +
 	"\bMmapInfo\x12=\n" +
 	"\fcontext_data\x18\x01 \x01(\v2\x1a.gvisor.common.ContextDataR\vcontextData\x12\x1f\n" +
 	"\vmapped_path\x18\x02 \x01(\tR\n" +
@@ -458,7 +574,11 @@ const file_pkg_sentry_seccheck_points_sentry_proto_rawDesc = "" +
 	"mapped_uid\x18\x05 \x01(\rR\tmappedUid\x12\x1d\n" +
 	"\n" +
 	"mapped_gid\x18\x06 \x01(\rR\tmappedGid\x12&\n" +
-	"\x0fis_initial_mmap\x18\a \x01(\bR\risInitialMmapb\x06proto3"
+	"\x0fis_initial_mmap\x18\a \x01(\bR\risInitialMmap\x12:\n" +
+	"\fmapped_ctime\x18\b \x01(\v2\x17.gvisor.common.TimespecR\vmappedCtime\x12'\n" +
+	"\x0foverlayfs_upper\x18\t \x01(\bR\x0eoverlayfsUpper\x12'\n" +
+	"\x0foverlayfs_lower\x18\n" +
+	" \x01(\bR\x0eoverlayfsLowerb\x06proto3"
 
 var (
 	file_pkg_sentry_seccheck_points_sentry_proto_rawDescOnce sync.Once
@@ -480,18 +600,25 @@ var file_pkg_sentry_seccheck_points_sentry_proto_goTypes = []any{
 	(*TaskExit)(nil),             // 3: gvisor.sentry.TaskExit
 	(*MmapInfo)(nil),             // 4: gvisor.sentry.MmapInfo
 	(*ContextData)(nil),          // 5: gvisor.common.ContextData
+	(*Timespec)(nil),             // 6: gvisor.common.Timespec
+	(*FdInfo)(nil),               // 7: gvisor.common.FdInfo
 }
 var file_pkg_sentry_seccheck_points_sentry_proto_depIdxs = []int32{
-	5, // 0: gvisor.sentry.CloneInfo.context_data:type_name -> gvisor.common.ContextData
-	5, // 1: gvisor.sentry.ExecveInfo.context_data:type_name -> gvisor.common.ContextData
-	5, // 2: gvisor.sentry.ExitNotifyParentInfo.context_data:type_name -> gvisor.common.ContextData
-	5, // 3: gvisor.sentry.TaskExit.context_data:type_name -> gvisor.common.ContextData
-	5, // 4: gvisor.sentry.MmapInfo.context_data:type_name -> gvisor.common.ContextData
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	5,  // 0: gvisor.sentry.CloneInfo.context_data:type_name -> gvisor.common.ContextData
+	5,  // 1: gvisor.sentry.ExecveInfo.context_data:type_name -> gvisor.common.ContextData
+	6,  // 2: gvisor.sentry.ExecveInfo.binary_ctime:type_name -> gvisor.common.Timespec
+	7,  // 3: gvisor.sentry.ExecveInfo.stdin:type_name -> gvisor.common.FdInfo
+	7,  // 4: gvisor.sentry.ExecveInfo.stdout:type_name -> gvisor.common.FdInfo
+	7,  // 5: gvisor.sentry.ExecveInfo.stderr:type_name -> gvisor.common.FdInfo
+	5,  // 6: gvisor.sentry.ExitNotifyParentInfo.context_data:type_name -> gvisor.common.ContextData
+	5,  // 7: gvisor.sentry.TaskExit.context_data:type_name -> gvisor.common.ContextData
+	5,  // 8: gvisor.sentry.MmapInfo.context_data:type_name -> gvisor.common.ContextData
+	6,  // 9: gvisor.sentry.MmapInfo.mapped_ctime:type_name -> gvisor.common.Timespec
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_pkg_sentry_seccheck_points_sentry_proto_init() }
